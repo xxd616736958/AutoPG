@@ -99,6 +99,67 @@ class ReplInterface:
 
     # ── Session resume with interactive picker ──
 
+    def _render_history(self, messages: list):
+        """Render restored session history in Claude Code format.
+        Shows user messages with ❯, assistant text as Markdown,
+        and tool calls with ⏺/⎿ markers."""
+        from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
+        import json
+
+        sys.stdout.write("\n")
+        for msg in messages:
+            if isinstance(msg, SystemMessage):
+                subtype = (msg.additional_kwargs or {}).get("subtype", "")
+                if subtype == "compact_boundary":
+                    self.console.print(f"[dim]── context compacted ──[/dim]")
+                continue
+
+            if isinstance(msg, HumanMessage):
+                content = str(msg.content) if msg.content else ""
+                if (msg.additional_kwargs or {}).get("is_meta"):
+                    continue  # Skip synthetic/metadata messages
+                first_line = content.strip().split("\n")[0][:100]
+                self.console.print(f"\n[bold]❯ {first_line}[/bold]")
+
+            elif isinstance(msg, AIMessage):
+                content = str(msg.content) if msg.content else ""
+                tool_calls = getattr(msg, "tool_calls", None) or []
+                tc_from_kwargs = (msg.additional_kwargs or {}).get("tool_calls", [])
+                all_tc = list(tool_calls) + list(tc_from_kwargs)
+                if all_tc:
+                    for tc in all_tc:
+                        name = tc.get("name", "?")
+                        args = tc.get("args", {})
+                        # Format call line
+                        native = None
+                        for t in self.engine.tools:
+                            if t.name == name or name in (t.aliases or []):
+                                native = t; break
+                        call_display = native.format_call(args) if native else name
+                        self.console.print(f"[dim]⏺ {call_display}[/dim]")
+                elif content:
+                    self.console.print(Markdown(content))
+
+            elif isinstance(msg, ToolMessage):
+                name = getattr(msg, "name", "") or (msg.additional_kwargs or {}).get("name", "")
+                content = str(msg.content) if msg.content else ""
+                # Try to format result
+                native = None
+                for t in self.engine.tools:
+                    if t.name == name or name in (t.aliases or []):
+                        native = t; break
+                try:
+                    data = json.loads(content) if content.startswith("{") else content
+                except:
+                    data = content
+                result_display = native.format_result(data) if native else content[:120]
+                self.console.print(f"[dim]  ⎿  {result_display}[/dim]")
+
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+    # ── Session resume with interactive picker ──
+
     async def _do_resume(self):
         """Open interactive session picker and restore selected session."""
         from .session_picker import pick_session
@@ -151,7 +212,12 @@ class ReplInterface:
         msg_count = data.get("message_count", len(messages)) if data else len(messages)
         saved_at = data.get("saved_at", "")[:19] if data else ""
 
-        self.console.print(f"[dim]Resumed session {sid[:16]}... · {msg_count} messages · {saved_at}[/dim]")
+        # Render restored history in Claude Code format
+        self._render_history(messages)
+
+        self.console.print(
+            f"[dim]Resumed session {sid[:16]}... · {msg_count} messages · {saved_at}[/dim]"
+        )
 
     # ── Callbacks ──
 
