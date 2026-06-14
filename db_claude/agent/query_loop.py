@@ -92,6 +92,12 @@ class QueryEngine:
                 sys_msg = SystemMessage(content=sys_prompt)
                 api_messages = [sys_msg] + list(self.mutable_messages)
 
+                # Estimate input tokens for tracking
+                input_text = sys_prompt + " ".join(
+                    str(m.content) if hasattr(m, "content") else ""
+                    for m in self.mutable_messages[-20:]  # Last 20 messages for efficiency
+                )
+
                 # ── Call model with streaming ──
                 llm = self._build_llm()
                 lc_tools = self._tools_to_langchain()
@@ -161,8 +167,8 @@ class QueryEngine:
                 )
                 self.mutable_messages.append(ai_msg)
 
-                # Track usage
-                self._track_usage(full_response)
+                # Track usage with input + output text for estimation
+                self._track_usage(full_response, input_text=input_text, output_text=full_content)
 
                 # ── Check for tool calls ──
                 if not tool_calls:
@@ -273,13 +279,23 @@ class QueryEngine:
                 max_tokens=8192, temperature=1.0, streaming=True,
             )
 
-    def _track_usage(self, response):
+    def _track_usage(self, response, input_text: str = "", output_text: str = ""):
+        # Try usage_metadata first (available on non-streaming Anthropic/OpenAI)
         if hasattr(response, "usage_metadata") and response.usage_metadata:
             um = response.usage_metadata
             self.total_usage["input_tokens"] += um.get("input_tokens", 0)
             self.total_usage["output_tokens"] += um.get("output_tokens", 0)
-        elif hasattr(response, "response_metadata") and response.response_metadata:
+            return
+        # Try response_metadata.token_usage (some OpenAI-compatible providers)
+        if hasattr(response, "response_metadata") and response.response_metadata:
             rm = response.response_metadata
             tu = rm.get("token_usage", {})
-            self.total_usage["input_tokens"] += tu.get("prompt_tokens", 0)
-            self.total_usage["output_tokens"] += tu.get("completion_tokens", 0)
+            if tu:
+                self.total_usage["input_tokens"] += tu.get("prompt_tokens", 0)
+                self.total_usage["output_tokens"] += tu.get("completion_tokens", 0)
+                return
+        # Fallback: count ourselves using the compact manager's tokenizer
+        if input_text:
+            self.total_usage["input_tokens"] += self._compact.count_tokens(input_text)
+        if output_text:
+            self.total_usage["output_tokens"] += self._compact.count_tokens(output_text)

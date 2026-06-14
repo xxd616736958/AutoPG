@@ -63,6 +63,12 @@ class SlashCommandHandler:
             handler=self._cmd_memory,
         ))
         self.register(SlashCommand(
+            name="resume",
+            description="Resume the most recent saved session",
+            handler=self._cmd_resume,
+            aliases=["r"],
+        ))
+        self.register(SlashCommand(
             name="exit",
             description="Exit db-claude",
             handler=self._cmd_exit,
@@ -183,6 +189,27 @@ class SlashCommandHandler:
         for mem in memories:
             lines.append(f"  - {mem['title']} ({mem['type']}): {mem['description']}")
         return "\n".join(lines)
+
+    def _cmd_resume(self, args: list, context: dict) -> str:
+        """Resume the most recent saved session."""
+        from ..utils.session import get_last_session_id, resume_messages
+
+        engine = context.get("query_engine")
+        if not engine:
+            return "No active query engine."
+
+        sid = get_last_session_id()
+        if not sid:
+            return "No saved sessions found."
+
+        messages = resume_messages(sid)
+        if not messages:
+            return f"Session {sid[:16]}... has no messages."
+
+        # Replace current messages with restored ones
+        engine.mutable_messages = messages
+        engine.set_session_id(sid)
+        return f"Resumed session {sid[:16]}... with {len(messages)} messages."
 
     def _cmd_exit(self, args: list, context: dict) -> str:
         """Exit the application."""

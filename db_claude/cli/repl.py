@@ -2,9 +2,7 @@
 REPL interface for db-claude with streaming output, tool progress, and session persistence.
 Architecturally mirrors Claude Code's REPL (src/screens/REPL.tsx).
 """
-import os
-import sys
-import asyncio
+import os, sys, asyncio
 from typing import Optional
 
 from prompt_toolkit import PromptSession
@@ -146,67 +144,68 @@ class ReplInterface:
         self._print_goodbye()
         save_config(self.config)
 
-    # ── streaming callbacks ──
+    # ── streaming callbacks (lightweight, no Rich formatting) ──
 
     def _on_token(self, token: str):
-        """Called for each token from the model. Print inline."""
-        self.console.print(token, end="", markup=False, highlight=False)
+        """Write token directly to stdout for real-time streaming."""
+        sys.stdout.write(token)
+        sys.stdout.flush()
 
     def _on_tool_start(self, name: str, activity: str):
-        """Called when a tool starts executing."""
-        self.console.print(f"\n[yellow]🔧 {activity}[/yellow] ", end="")
+        """Tool start — print activity line."""
+        sys.stdout.write(f"\n🔧 {activity} ")
+        sys.stdout.flush()
 
     def _on_tool_end(self, name: str, preview: str):
-        """Called when a tool finishes."""
-        self.console.print("[dim]✓[/dim]")
+        """Tool end."""
+        sys.stdout.write("✓\n")
+        sys.stdout.flush()
 
     # ── streaming message processing ──
 
     async def _process_message_streaming(self, prompt: str):
-        """Process a message with full streaming display."""
+        """Process a message with real-time streaming display."""
         if self.messages_clear:
             self.query_engine.mutable_messages = []
             self.messages_clear = False
 
-        self.console.print()  # Newline before response
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+        streamed_text = ""
 
         try:
             async for event in self.query_engine.submit_message(prompt):
                 etype = event.get("type", "")
 
                 if etype == "token":
-                    # Already printed via callback
-                    pass
+                    streamed_text += event.get("content", "")
+                    # Already printed via _on_token callback
 
                 elif etype == "tool_start":
-                    name = event.get("name", "")
-                    activity = event.get("activity", name)
-                    self.console.print(f"\n[yellow]🔧 {activity}[/yellow] ", end="")
+                    pass  # Already printed via _on_tool_start callback
 
                 elif etype == "tool_end":
-                    self.console.print("[dim]✓[/dim]")
-                    preview = event.get("result_preview", "")
-                    if preview and self.config.verbose:
-                        self.console.print(f"[dim]   {preview[:120]}[/dim]")
-
-                elif etype == "state_update":
-                    pass  # Internal state tracking
+                    pass  # Already printed via _on_tool_end callback
 
                 elif etype == "result":
-                    self.console.print()  # Final newline
-                    text = event.get("result", "")
-                    if text:
-                        self.console.print(Markdown(text))
+                    # Only print result via Rich if it wasn't already streamed
+                    final_text = event.get("result", "")
+                    if final_text and final_text not in streamed_text:
+                        # Token-by-token streaming didn't cover this (e.g. short responses)
+                        sys.stdout.write("\n")
+                        sys.stdout.flush()
+                        self.console.print(Markdown(final_text))
 
                     # Show metadata
                     duration = event.get("duration_ms", 0) / 1000
                     turns = event.get("num_turns", 0)
                     usage = event.get("usage", {})
                     meta_parts = [f"{turns} turns", f"{duration:.1f}s"]
-                    if usage:
-                        tok_in = usage.get("input_tokens", 0)
-                        tok_out = usage.get("output_tokens", 0)
-                        meta_parts.append(f"{tok_in:,}+{tok_out:,} tokens")
+                    tok_in = usage.get("input_tokens", 0)
+                    tok_out = usage.get("output_tokens", 0)
+                    if tok_in > 0 or tok_out > 0:
+                        meta_parts.append(f"{tok_in:,}↑ {tok_out:,}↓ tokens")
                     self.console.print(f"[dim]({' | '.join(meta_parts)})[/dim]")
 
                     errors = event.get("errors", [])
