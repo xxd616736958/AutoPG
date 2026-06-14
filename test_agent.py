@@ -55,6 +55,15 @@ def print_result(result: dict):
         print(f"  {'─'*61}")
 
 
+async def consume_result(engine: QueryEngine, prompt: str) -> dict:
+    """Consume streaming events from submit_message, return final result."""
+    final = None
+    async for event in engine.submit_message(prompt):
+        if event.get("type") == "result":
+            final = event
+    return final or {"is_error": True, "errors": ["No result received"]}
+
+
 def create_engine(max_turns: int = 5) -> QueryEngine:
     """Create a QueryEngine configured for DeepSeek."""
     tools = create_default_tools()
@@ -74,7 +83,7 @@ async def test_case_1_simple_question():
     print_section("TC1: Simple Question (No Tools)")
 
     engine = create_engine(max_turns=3)
-    result = await engine.submit_message(
+    result = await consume_result(engine,
         "What is the capital of France? Answer in exactly one sentence."
     )
     print_result(result)
@@ -89,7 +98,7 @@ async def test_case_2_file_read_and_explain():
     print_section("TC2: File Read + Explain")
 
     engine = create_engine(max_turns=5)
-    result = await engine.submit_message(
+    result = await consume_result(engine,
         "Read the file 'db_claude/tools/base.py' and explain in 3-4 bullet points "
         "what the Tool base class provides."
     )
@@ -105,7 +114,7 @@ async def test_case_3_bash_and_analysis():
     print_section("TC3: Bash Tool + Analysis")
 
     engine = create_engine(max_turns=6)
-    result = await engine.submit_message(
+    result = await consume_result(engine,
         "Use bash to list all the Python files in the db_claude/tools/ directory "
         "and show their sizes. Then tell me which is the largest file and what "
         "tool it likely implements."
@@ -122,7 +131,7 @@ async def test_case_4_glob_search():
     print_section("TC4: Glob + Grep Search")
 
     engine = create_engine(max_turns=6)
-    result = await engine.submit_message(
+    result = await consume_result(engine,
         "1. Use Glob to find all __init__.py files in the db_claude/ directory tree.\n"
         "2. Read one of them and tell me what it exports.\n"
         "3. Count how many __init__.py files you found."
@@ -141,7 +150,7 @@ async def test_case_5_code_writing():
     test_file = "/tmp/db_claude_test_demo.py"
     engine = create_engine(max_turns=6)
 
-    result = await engine.submit_message(
+    result = await consume_result(engine,
         f"Write a Python file to '{test_file}' that contains:\n"
         f"1. A 'factorial(n)' function using recursion\n"
         f"2. A 'main()' function that prints factorial(5)\n"

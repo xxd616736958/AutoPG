@@ -83,6 +83,12 @@ class SlashCommandHandler:
             description="Show or change permission mode",
             handler=self._cmd_permissions,
         ))
+        self.register(SlashCommand(
+            name="session",
+            description="Show session info, list sessions, or resume",
+            handler=self._cmd_session,
+            aliases=["sessions"],
+        ))
 
     def register(self, command: SlashCommand):
         """Register a slash command."""
@@ -213,3 +219,36 @@ class SlashCommandHandler:
             config.permission_mode = mode
             return f"Permission mode changed to: {mode}"
         return f"Current permission mode: {config.permission_mode}"
+
+    def _cmd_session(self, args: list, context: dict) -> str:
+        """Show session info or list sessions."""
+        from ..utils.session import list_sessions, get_last_session_id, load_session
+
+        engine = context.get("query_engine")
+        if not engine:
+            return "No active session."
+
+        if args and args[0] == "list":
+            sessions = list_sessions(limit=20)
+            if not sessions:
+                return "No saved sessions."
+            lines = [f"{'SESSION ID':<38} {'MSGS':>5}  SAVED AT"]
+            for s in sessions:
+                sid = s["session_id"][:36]
+                msgs = s["message_count"]
+                saved = s["saved_at"][:19]
+                marker = " ← current" if s["session_id"] == engine.session_id else ""
+                lines.append(f"{sid:<38} {msgs:>5}  {saved}{marker}")
+            return "\n".join(lines)
+
+        sid = engine.session_id
+        msgs = len(engine.mutable_messages)
+        usage = engine.total_usage
+        return (
+            f"Current session: {sid[:16]}...\n"
+            f"Messages: {msgs}\n"
+            f"Input tokens:  {usage.get('input_tokens', 0):,}\n"
+            f"Output tokens: {usage.get('output_tokens', 0):,}\n"
+            f"Auto-save:     enabled\n"
+            f"\nUse /session list to view saved sessions."
+        )

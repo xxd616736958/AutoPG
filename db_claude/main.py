@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from db_claude.utils.config import get_global_config, load_config, save_config
+from db_claude.utils.session import resume_messages, list_sessions, load_session, get_last_session_id
 from db_claude.tools import create_default_tools
 from db_claude.agent.query_loop import QueryEngine
 from db_claude.cli.commands import SlashCommandHandler
@@ -33,6 +34,21 @@ def parse_args():
         "prompt",
         nargs="?",
         help="Initial prompt to send (non-interactive mode)",
+    )
+    parser.add_argument(
+        "--resume", "-r",
+        action="store_true",
+        help="Resume the most recent session",
+    )
+    parser.add_argument(
+        "--session", "-s",
+        default=None,
+        help="Resume a specific session by ID",
+    )
+    parser.add_argument(
+        "--list-sessions", "-ls",
+        action="store_true",
+        help="List saved sessions and exit",
     )
     parser.add_argument(
         "--version", "-v",
@@ -113,31 +129,31 @@ def parse_args():
         action="store_true",
         help="Initialize a new CLAUDE.md for the project",
     )
-    parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="Resume the last conversation",
-    )
 
     return parser.parse_args()
 
 
-def _build_engine(args, config, non_interactive: bool = False) -> QueryEngine:
-    """Build a QueryEngine from args + config. Shared by interactive and print modes."""
+def _build_engine(args, config, non_interactive: bool = False, resume_sid: str = None) -> QueryEngine:
+    """Build a QueryEngine from args + config."""
     tools = create_default_tools()
     tools_list = tools.list_enabled()
 
-    # Resolve config: CLI args > env vars > config file
     provider = args.provider or config.provider
     model = args.model or config.model
     api_key = args.api_key or config.api_key
     base_url = args.base_url or config.base_url
 
-    # Fallback: if provider is deepseek and no base_url, set default
     if provider == "deepseek" and not base_url:
         base_url = "https://api.deepseek.com/v1"
 
-    return QueryEngine(
+    # Restore messages from session if resuming
+    initial_messages = None
+    if resume_sid:
+        initial_messages = resume_messages(resume_sid)
+        if initial_messages:
+            print(f"Restored {len(initial_messages)} messages from session {resume_sid[:16]}...")
+
+    engine = QueryEngine(
         tools=tools_list,
         model_name=model,
         fallback_model=args.fallback_model or config.fallback_model,
@@ -151,13 +167,19 @@ def _build_engine(args, config, non_interactive: bool = False) -> QueryEngine:
         provider=provider,
         api_key=api_key,
         base_url=base_url,
+        initial_messages=initial_messages,
     )
 
+    if resume_sid:
+        engine.set_session_id(resume_sid)
 
-async def run_interactive(args, config):
+    return engine
+
+
+async def run_interactive(args, config, resume_sid: str = None):
     """Run the interactive REPL mode."""
     cmd_handler = SlashCommandHandler()
-    engine = _build_engine(args, config, non_interactive=False)
+    engine = _build_engine(args, config, non_interactive=False, resume_sid=resume_sid)
 
     # Print startup info
     print(f"\n  Provider: {config.provider}")
@@ -173,9 +195,9 @@ async def run_interactive(args, config):
     await repl.run()
 
 
-async def run_print_mode(args, config):
+async def run_print_mode(args, config, resume_sid: str = None):
     """Run in non-interactive print mode (mirrors --print / -p)."""
-    engine = _build_engine(args, config, non_interactive=True)
+    engine = _build_engine(args, config, non_interactive=True, resume_sid=resume_sid)
 
     prompt = args.prompt or sys.stdin.read().strip()
     if not prompt:
@@ -183,17 +205,29 @@ async def run_print_mode(args, config):
         sys.exit(1)
 
     try:
-        result = await engine.submit_message(prompt)
-        if result.get("type") == "result":
-            text = result.get("result", "")
-            if text:
-                print(text)
-            else:
-                import json
-                print(json.dumps(result, indent=2, ensure_ascii=False))
-        sys.exit(0 if not result.get("is_error") else 1)
+        final_result = None
+        async for event in engine.submit_message(prompt):
+            if event.get("type") == "token":
+                # Print tokens immediately for streaming output
+                print(event.get("content", ""), end="", flush=True)
+            elif event.get("type") == "result":
+                final_result = event
+
+        if final_result is None:
+            print("Error: no result received", file=sys.stderr)
+            sys.exit(1)
+
+        # Print a final newline after streaming
+        print()
+
+        text = final_result.get("result", "")
+        if not text:
+            import json
+            print(json.dumps(final_result, indent=2, ensure_ascii=False))
+
+        sys.exit(0 if not final_result.get("is_error") else 1)
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        print(f"\nError: {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -207,6 +241,22 @@ def main():
         print(f"db-claude v{__version__}")
         sys.exit(0)
 
+    # List sessions
+    if args.list_sessions:
+        sessions = list_sessions(limit=50)
+        if not sessions:
+            print("No saved sessions.")
+        else:
+            print(f"{'SESSION ID':<38} {'MESSAGES':>8} {'SIZE':>8}  SAVED AT")
+            print("-" * 80)
+            for s in sessions:
+                sid = s["session_id"][:36]
+                msgs = s["message_count"]
+                size = f"{s['size_bytes']/1024:.1f}K"
+                saved = s["saved_at"][:19]
+                print(f"{sid:<38} {msgs:>8} {size:>8}  {saved}")
+        sys.exit(0)
+
     # Initialize CLAUDE.md
     if args.init:
         _init_claude_md(args)
@@ -214,6 +264,17 @@ def main():
 
     # Load config
     config = load_config()
+
+    # Resolve session ID for resume
+    resume_sid = None
+    if args.session:
+        resume_sid = args.session
+    elif args.resume:
+        resume_sid = get_last_session_id()
+        if resume_sid:
+            print(f"Resuming session: {resume_sid[:16]}...")
+        else:
+            print("No previous session found. Starting new session.")
 
     # Apply CLI overrides to config (so slash commands see updates)
     if args.model:
@@ -244,9 +305,9 @@ def main():
 
     # Run in appropriate mode
     if args.print or (args.prompt and not sys.stdin.isatty()):
-        asyncio.run(run_print_mode(args, config))
+        asyncio.run(run_print_mode(args, config, resume_sid))
     else:
-        asyncio.run(run_interactive(args, config))
+        asyncio.run(run_interactive(args, config, resume_sid))
 
 
 def _init_claude_md(args):
