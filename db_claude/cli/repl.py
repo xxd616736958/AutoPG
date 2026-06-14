@@ -68,8 +68,15 @@ class ReplInterface:
                 if not user_input.strip(): continue
                 if self.cmd and user_input.strip().startswith("/"):
                     ctx = {"config": self.config, "query_engine": self.engine, "memory_manager": MemoryManager(),
-                           "messages_clear": False, "should_exit": False, "session_id": self.engine.session_id}
+                           "messages_clear": False, "should_exit": False, "session_id": self.engine.session_id,
+                           "open_session_picker": False}
                     result = self.cmd.handle(user_input, ctx)
+
+                    # Interactive session picker (Claude Code /resume)
+                    if ctx.get("open_session_picker"):
+                        await self._do_resume()
+                        continue
+
                     if ctx.get("messages_clear"): self.messages_clear = True
                     if ctx.get("should_exit"): self.should_exit = True
                     if result: self.console.print(Markdown(result))
@@ -89,6 +96,37 @@ class ReplInterface:
 
         self.console.print(f"\n[dim]Session {self.engine.session_id[:8]}... saved.[/dim]")
         save_config(self.config)
+
+    # ── Session resume with interactive picker ──
+
+    async def _do_resume(self):
+        """Open interactive session picker and restore selected session."""
+        from .session_picker import pick_session
+        from ..utils.session import resume_messages, load_session
+
+        try:
+            sid = await pick_session(current_session_id=self.engine.session_id)
+        except Exception as e:
+            self.console.print(f"[red]Session picker error: {e}[/red]")
+            return
+
+        if not sid:
+            self.console.print("[dim]Cancelled.[/dim]")
+            return
+
+        messages = resume_messages(sid)
+        if not messages:
+            self.console.print(f"[red]Session {sid[:16]}... has no messages.[/red]")
+            return
+
+        self.engine.mutable_messages = messages
+        self.engine.set_session_id(sid)
+
+        data = load_session(sid)
+        msg_count = data.get("message_count", len(messages)) if data else len(messages)
+        saved_at = data.get("saved_at", "")[:19] if data else ""
+
+        self.console.print(f"[dim]Resumed session {sid[:16]}... · {msg_count} messages · {saved_at}[/dim]")
 
     # ── Callbacks ──
 
