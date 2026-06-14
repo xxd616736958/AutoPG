@@ -36,15 +36,32 @@ def save_session(
 ) -> str:
     """
     Save a session transcript to disk.
-    Mirrors recordTranscript() in sessionStorage.ts.
-
-    Each message is serialized as a dict with:
-    - type: 'human' | 'ai' | 'tool' | 'system'
-    - content: str
-    - timestamp: iso format
-    - tool_calls: optional list
+    Auto-extracts title from first user message and git branch from cwd.
     """
     _ensure_dir()
+
+    # Auto-extract session title from first human message
+    title = ""
+    for msg in messages:
+        if _msg_type(msg) == "human":
+            content = _msg_content(msg)
+            if content:
+                first_line = content.strip().split("\n")[0].strip()
+                title = first_line[:80]
+            break
+
+    # Auto-detect git branch
+    branch = ""
+    cwd = (metadata or {}).get("cwd", "")
+    if cwd:
+        try:
+            import subprocess
+            r = subprocess.run(["git", "-C", cwd, "branch", "--show-current"],
+                             capture_output=True, text=True, timeout=3)
+            if r.returncode == 0:
+                branch = r.stdout.strip()
+        except Exception:
+            pass
 
     serialized = []
     for msg in messages:
@@ -75,7 +92,11 @@ def save_session(
         "saved_at": datetime.now().isoformat(),
         "message_count": len(serialized),
         "messages": serialized,
-        "metadata": metadata or {},
+        "metadata": {
+            **(metadata or {}),
+            "title": title,
+            "branch": branch,
+        },
     }
 
     path = get_session_path(session_id)
@@ -113,11 +134,14 @@ def list_sessions(limit: int = 20) -> list[dict]:
             with open(fpath, "r") as f:
                 data = json.load(f)
             stat = os.stat(fpath)
+            meta = data.get("metadata", {})
             sessions.append({
                 "session_id": data.get("session_id", os.path.basename(fpath)[:-5]),
                 "saved_at": data.get("saved_at", ""),
                 "message_count": data.get("message_count", 0),
                 "size_bytes": stat.st_size,
+                "title": meta.get("title", ""),
+                "branch": meta.get("branch", ""),
             })
         except (json.JSONDecodeError, IOError):
             continue
