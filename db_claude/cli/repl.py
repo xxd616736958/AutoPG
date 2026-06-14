@@ -102,13 +102,38 @@ class ReplInterface:
     async def _do_resume(self):
         """Open interactive session picker and restore selected session."""
         from .session_picker import pick_session
-        from ..utils.session import resume_messages, load_session
+        from ..utils.session import resume_messages, load_session, list_sessions
 
         try:
             sid = await pick_session(current_session_id=self.engine.session_id)
         except Exception as e:
-            self.console.print(f"[red]Session picker error: {e}[/red]")
-            return
+            # Fallback: simple text-mode listing
+            self.console.print(f"[dim]TUI picker unavailable, showing text list:[/dim]")
+            sessions = list_sessions(limit=20)
+            if not sessions:
+                self.console.print("[dim]No saved sessions.[/dim]")
+                return
+            for i, s in enumerate(sessions):
+                marker = "← current" if s["session_id"] == self.engine.session_id else ""
+                self.console.print(
+                    f"  [{i}] {s['session_id'][:16]}... "
+                    f"{s.get('message_count',0)} msgs · "
+                    f"{s.get('saved_at','')[:19]} {marker}"
+                )
+            try:
+                choice = input("  Select session number (or Enter to cancel): ").strip()
+                if not choice:
+                    self.console.print("[dim]Cancelled.[/dim]")
+                    return
+                idx = int(choice)
+                if 0 <= idx < len(sessions):
+                    sid = sessions[idx]["session_id"]
+                else:
+                    self.console.print("[red]Invalid selection.[/red]")
+                    return
+            except (ValueError, EOFError):
+                self.console.print("[dim]Cancelled.[/dim]")
+                return
 
         if not sid:
             self.console.print("[dim]Cancelled.[/dim]")
