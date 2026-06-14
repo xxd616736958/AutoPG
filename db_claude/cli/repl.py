@@ -94,8 +94,7 @@ class ReplInterface:
 
     def _on_token(self, token: str):
         self._token_count += 1
-        sys.stdout.write(token)
-        sys.stdout.flush()
+        # Tokens are printed by _process event loop — do NOT double-write here
 
     def _on_tool_start(self, name: str, activity: str):
         self._tool_start_time = time.time()
@@ -145,24 +144,24 @@ class ReplInterface:
 
                 elif etype == "tool_start":
                     name = event.get("name", "")
-                    activity = event.get("activity", name)
-                    # Get tool for proper formatting
-                    native = None
-                    for t in self.engine.tools:
-                        if t.name == name or name in (t.aliases or []):
-                            native = t; break
-
-                    # Build Claude Code call line
-                    call_line = self._format_call(native, name, activity)
-                    sys.stdout.write(f"\n⏺ {call_line}\n")
+                    # Use pre-formatted call_display from query_loop (already format_call(args))
+                    call_display = event.get("call_display", "")
+                    if not call_display or call_display == name:
+                        # Fallback: build from args
+                        args = event.get("args", {})
+                        native = None
+                        for t in self.engine.tools:
+                            if t.name == name or name in (t.aliases or []):
+                                native = t; break
+                        call_display = native.format_call(args) if native else f"{name}"
+                    sys.stdout.write(f"\n⏺ {call_display}\n")
                     sys.stdout.flush()
                     current_tool = name
 
                 elif etype == "tool_end":
-                    name = event.get("name", "")
-                    result_data = event.get("result_preview", "")
-                    # Build Claude Code result line
-                    result_line = self._format_result(name, result_data)
+                    result_line = event.get("result_preview", "")
+                    if not result_line:
+                        result_line = "done"
                     sys.stdout.write(f"  ⎿  {result_line}\n")
                     sys.stdout.flush()
                     current_tool = None
