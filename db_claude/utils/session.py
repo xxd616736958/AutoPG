@@ -71,12 +71,20 @@ def save_session(
             "timestamp": datetime.now().isoformat(),
         }
 
-        # Save tool calls if present
+        # Save tool calls if present (on AIMessage)
         if hasattr(msg, "tool_calls") and msg.tool_calls:
             entry["tool_calls"] = [
                 {"name": tc.get("name", ""), "args": tc.get("args", {})}
                 for tc in msg.tool_calls
             ]
+
+        # Save ToolMessage-specific fields (tool_call_id, name)
+        if hasattr(msg, "tool_call_id") and msg.tool_call_id:
+            entry.setdefault("meta", {})
+            entry["meta"]["tool_call_id"] = msg.tool_call_id
+        if hasattr(msg, "name") and msg.name:
+            entry.setdefault("meta", {})
+            entry["meta"]["name"] = msg.name
 
         # Save additional kwargs
         if hasattr(msg, "additional_kwargs") and msg.additional_kwargs:

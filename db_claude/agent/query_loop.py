@@ -293,6 +293,13 @@ class QueryEngine:
                     break
 
             # ── Done ──
+            # Pull final state from LangGraph checkpointer to get ALL messages
+            final_state = app.get_state(config)
+            if final_state and hasattr(final_state, 'values'):
+                all_messages = list(final_state.values.get("messages", []))
+                if all_messages:
+                    self.mutable_messages = all_messages
+
             text_result = accumulated_text.strip()
             if not text_result:
                 for msg in reversed(self.mutable_messages):
