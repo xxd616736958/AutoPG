@@ -116,9 +116,7 @@ class ReplInterface:
 
         self._token_count = 0
         self._thinking_start = time.time()
-        thinking_emitted = False
-        tool_result_lines: list[str] = []
-        current_tool = None
+        thinking_shown = False
         streamed = ""
 
         sys.stdout.write("\n")
@@ -131,16 +129,13 @@ class ReplInterface:
                 if etype == "token":
                     tok = event.get("content", "")
                     streamed += tok
-                    if not thinking_emitted and self._thinking_start > 0:
-                        # Emit thinking line before first real token
+                    # Show thinking indicator instead of raw streaming
+                    if not thinking_shown:
                         elapsed = time.time() - self._thinking_start
-                        if elapsed > 0.5:  # Only show if thinking took >500ms
-                            sys.stdout.write(f"\n⏺ Thinking… ({elapsed:.0f}s · ↓ {self.engine.total_usage.get('output_tokens', 0):,} tokens)\n")
+                        if elapsed > 0.3:
+                            sys.stdout.write(f"⏺ Thinking…\n")
                             sys.stdout.flush()
-                            thinking_emitted = True
-                    if thinking_emitted or self._thinking_start == 0:
-                        sys.stdout.write(tok)
-                        sys.stdout.flush()
+                            thinking_shown = True
 
                 elif etype == "tool_start":
                     name = event.get("name", "")
@@ -167,25 +162,30 @@ class ReplInterface:
                     current_tool = None
 
                 elif etype == "result":
+                    # Render the streamed text as formatted Markdown (Claude Code style)
                     sys.stdout.write("\n")
                     sys.stdout.flush()
 
-                    # Show timing
+                    final_text = event.get("result", streamed)
+                    if final_text:
+                        # Use Rich to render GitHub-flavored Markdown
+                        self.console.print(Markdown(final_text))
+
+                    # Timing line
                     duration = event.get("duration_ms", 0) / 1000
                     turns = event.get("num_turns", 0)
                     usage = event.get("usage", {})
                     tok_in = usage.get("input_tokens", 0)
                     tok_out = usage.get("output_tokens", 0)
 
-                    # Claude Code timing line
                     timing_parts = [f"{duration:.1f}s"]
                     if turns > 0: timing_parts.append(f"{turns} turns")
                     if tok_in > 0: timing_parts.append(f"↓ {tok_out:,} tokens")
-                    self.console.print(f"[dim]  ⏺ {', '.join(timing_parts)}[/dim]")
+                    self.console.print(f"[dim]⏺ {', '.join(timing_parts)}[/dim]")
 
                     errors = event.get("errors", [])
                     for err in errors:
-                        self.console.print(f"[red]  Error: {err}[/red]")
+                        self.console.print(f"[red]Error: {err}[/red]")
                     break
 
         except Exception as e:
