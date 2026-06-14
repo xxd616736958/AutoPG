@@ -194,7 +194,9 @@ class QueryEngine:
                             break
                     activity = native_tool.get_activity_description(tool_args) if native_tool else tool_name
 
-                    yield {"type": "tool_start", "name": tool_name, "activity": activity}
+                    # Format call for Claude Code display
+                    call_display = native_tool.format_call(tool_args) if native_tool else f"{tool_name}"
+                    yield {"type": "tool_start", "name": tool_name, "activity": activity, "args": tool_args, "call_display": call_display}
                     if self.on_tool_start:
                         self.on_tool_start(tool_name, activity)
 
@@ -218,9 +220,16 @@ class QueryEngine:
                         else:
                             content = f"Tool '{tool_name}' not found"
 
-                    yield {"type": "tool_end", "name": tool_name, "result_preview": content[:200]}
+                    # Format result using tool's format_result for Claude Code style
+                    result_data_for_format = None
+                    try:
+                        result_data_for_format = json.loads(content) if content.startswith("{") else content
+                    except: result_data_for_format = content
+                    formatted_result = native_tool.format_result(result_data_for_format) if native_tool else content[:200]
+
+                    yield {"type": "tool_end", "name": tool_name, "result_preview": formatted_result}
                     if self.on_tool_end:
-                        self.on_tool_end(tool_name, content[:200])
+                        self.on_tool_end(tool_name, formatted_result)
 
                     self.mutable_messages.append(ToolMessage(
                         content=str(content), tool_call_id=tool_call_id, name=tool_name,

@@ -4,7 +4,7 @@ Architecturally identical to Claude Code's FileEditTool.
 Uses exact string replacement for precise edits.
 """
 import os
-from typing import Type
+from typing import Type, Any
 from pydantic import BaseModel, Field
 
 from .base import Tool, PermissionResult
@@ -24,6 +24,22 @@ class FileEditTool(Tool):
     name = "Edit"
     aliases = []
     search_hint = "perform exact string replacement in a file"
+
+    def format_call(self, args: dict) -> str:
+        fp = args.get("file_path", "")
+        fn = os.path.basename(fp) if fp else "?"
+        old = args.get("old_string", "")[:40]
+        new = args.get("new_string", "")[:40]
+        return f"Edit({fn})"
+
+    def format_result(self, data: Any) -> str:
+        if isinstance(data, dict):
+            n = data.get("occurrences_replaced", 0)
+            total = data.get("total_occurrences", 0)
+            if n == 1 and total == 1:
+                return "replaced 1 occurrence"
+            return f"replaced {n}/{total} occurrences"
+        return str(data)[:120]
 
     def input_schema(self) -> Type[BaseModel]:
         return FileEditInput

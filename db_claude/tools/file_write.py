@@ -3,7 +3,7 @@ FileWrite tool for db-claude.
 Architecturally identical to Claude Code's FileWriteTool.
 """
 import os
-from typing import Type
+from typing import Type, Any
 from pydantic import BaseModel, Field
 
 from .base import Tool, PermissionResult
@@ -21,6 +21,21 @@ class FileWriteTool(Tool):
     name = "Write"
     aliases = []
     search_hint = "write a file to disk, overwriting if exists"
+
+    def format_call(self, args: dict) -> str:
+        fp = args.get("file_path", "")
+        fn = os.path.basename(fp) if fp else "?"
+        return f"Write({fn})"
+
+    def format_result(self, data: Any) -> str:
+        if isinstance(data, dict):
+            size = data.get("size", 0)
+            existed = data.get("existed_before", False)
+            status = "overwritten" if existed else "written"
+            if size > 0:
+                return f"{status} ({size:,} bytes)"
+            return status
+        return str(data)[:120]
 
     def input_schema(self) -> Type[BaseModel]:
         return FileWriteInput

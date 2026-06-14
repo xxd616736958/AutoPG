@@ -5,7 +5,7 @@ Architecturally identical to Claude Code's GrepTool.
 import os
 import re
 import subprocess
-from typing import Type
+from typing import Type, Any
 from pydantic import BaseModel, Field
 
 from .base import Tool
@@ -30,6 +30,19 @@ class GrepTool(Tool):
 
     def input_schema(self) -> Type[BaseModel]:
         return GrepInput
+
+    def format_call(self, args: dict) -> str:
+        pattern = args.get("pattern", "")
+        return f"Grep({pattern[:60]})"
+
+    def format_result(self, data: Any) -> str:
+        if isinstance(data, dict):
+            count = data.get("count", 0)
+            results = data.get("results", [])[:3]
+            preview = "; ".join(r[:60] for r in results)
+            more = f" ... +{count - 3} more" if count > 3 else ""
+            return f"{count} matches" + (f": {preview}{more}" if preview else "")
+        return str(data)[:120]
 
     async def call(self, args: dict, context: dict) -> dict:
         """Search file contents using regex."""

@@ -4,7 +4,7 @@ Architecturally identical to Claude Code's GlobTool.
 """
 import os
 import fnmatch
-from typing import Type
+from typing import Type, Any
 from pydantic import BaseModel, Field
 
 from .base import Tool
@@ -25,6 +25,20 @@ class GlobTool(Tool):
 
     def input_schema(self) -> Type[BaseModel]:
         return GlobInput
+
+    def format_call(self, args: dict) -> str:
+        pattern = args.get("pattern", "*")
+        return f"Glob({pattern})"
+
+    def format_result(self, data: Any) -> str:
+        if isinstance(data, dict):
+            count = data.get("count", 0)
+            results = data.get("results", [])
+            # Show first few matches
+            preview = ", ".join(r[:40] for r in results[:3])
+            more = f" ... +{count - 3} more" if count > 3 else ""
+            return f"{count} files" + (f": {preview}{more}" if preview else "")
+        return str(data)[:120]
 
     async def call(self, args: dict, context: dict) -> dict:
         """Find files matching a glob pattern."""

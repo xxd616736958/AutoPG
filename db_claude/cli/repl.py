@@ -1,243 +1,232 @@
 """
-REPL interface for db-claude with streaming output, tool progress, and session persistence.
-Architecturally mirrors Claude Code's REPL (src/screens/REPL.tsx).
+REPL interface — Claude Code output style: ⏺ tool calls, ⎿ results, timing.
 """
-import os, sys, asyncio
+import os, sys, asyncio, time
 from typing import Optional
-
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.completion import Completer, Completion
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.live import Live
-from rich.spinner import Spinner
-from rich.text import Text
-from rich.table import Table
 
 from ..utils.config import get_global_config, save_config
-from ..utils.session import save_session, list_sessions, get_last_session_id
 from ..context.memory import MemoryManager
 from ..context.compact import CompactManager
 
 
 CLI_STYLE = Style.from_dict({
-    "prompt": "bold #00ff87",
-    "input": "#ffffff",
-    "thinking": "italic #888888",
-    "tool-call": "#ffaa00",
-    "tool-result": "#00aaff",
-    "error": "#ff0000 bold",
-    "info": "#888888",
+    "prompt": "bold #00ff87", "input": "#ffffff",
 })
 
 
 class CommandCompleter(Completer):
-    def __init__(self, command_handler):
-        self.command_handler = command_handler
-
+    def __init__(self, handler): self.handler = handler
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
         if text.startswith("/"):
             seen = set()
-            for cmd_name in sorted(self.command_handler._commands.keys()):
-                if cmd_name not in seen and cmd_name.startswith(text[1:]):
-                    seen.add(cmd_name)
-                    yield Completion(cmd_name, start_position=-len(text) + 1)
+            for n in sorted(self.handler._commands.keys()):
+                if n not in seen and n.startswith(text[1:]):
+                    seen.add(n); yield Completion(n, start_position=-len(text) + 1)
 
 
 class ReplInterface:
-    """Interactive REPL with streaming, progress, and session management."""
+    """REPL with Claude Code output format."""
 
     def __init__(self, query_engine, config=None, command_handler=None):
-        self.query_engine = query_engine
+        self.engine = query_engine
         self.config = config or get_global_config()
-        self.command_handler = command_handler
+        self.cmd = command_handler
         self.console = Console()
         self.should_exit = False
         self.messages_clear = False
-        self.compact_manager = CompactManager(model_name=self.config.model)
+        self._compact = CompactManager(model_name=self.config.model)
+        # Streaming state
+        self._token_count = 0
+        self._tool_start_time = 0
+        self._thinking_start = 0
 
     def _get_history_path(self) -> str:
-        history_dir = os.path.expanduser("~/.db-claude")
-        os.makedirs(history_dir, exist_ok=True)
-        return os.path.join(history_dir, "history")
+        d = os.path.expanduser("~/.db-claude"); os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "history")
 
     async def run(self):
         self._print_welcome()
+        # Wire callbacks
+        self.engine.on_stream_token = self._on_token
+        self.engine.on_tool_start = self._on_tool_start
+        self.engine.on_tool_end = self._on_tool_end
 
-        # Register streaming callbacks on the engine
-        self.query_engine.on_stream_token = self._on_token
-        self.query_engine.on_tool_start = self._on_tool_start
-        self.query_engine.on_tool_end = self._on_tool_end
-
-        session = PromptSession(
-            history=FileHistory(self._get_history_path()),
-            style=CLI_STYLE,
-            completer=CommandCompleter(self.command_handler) if self.command_handler else None,
-        )
-
+        session = PromptSession(history=FileHistory(self._get_history_path()), style=CLI_STYLE,
+                                completer=CommandCompleter(self.cmd) if self.cmd else None)
         while not self.should_exit:
             try:
-                user_input = await session.prompt_async(
-                    HTML("<prompt>❯ </prompt>"), multiline=False,
-                )
-
-                if not user_input.strip():
+                user_input = await session.prompt_async(HTML("<prompt>❯ </prompt>"), multiline=False)
+                if not user_input.strip(): continue
+                if self.cmd and user_input.strip().startswith("/"):
+                    ctx = {"config": self.config, "query_engine": self.engine, "memory_manager": MemoryManager(),
+                           "messages_clear": False, "should_exit": False, "session_id": self.engine.session_id}
+                    result = self.cmd.handle(user_input, ctx)
+                    if ctx.get("messages_clear"): self.messages_clear = True
+                    if ctx.get("should_exit"): self.should_exit = True
+                    if result: self.console.print(Markdown(result))
                     continue
 
-                # Slash commands
-                if self.command_handler and user_input.strip().startswith("/"):
-                    context = {
-                        "config": self.config,
-                        "query_engine": self.query_engine,
-                        "memory_manager": MemoryManager(),
-                        "messages_clear": False,
-                        "should_exit": False,
-                        "session_id": self.query_engine.session_id,
-                    }
-                    result = self.command_handler.handle(user_input, context)
+                # Auto-compact check
+                cs = self._compact.should_compact(self.engine.mutable_messages)
+                if cs["is_at_blocking"]:
+                    self.engine.mutable_messages = self._compact.compact_messages(self.engine.mutable_messages, keep_recent=15)
 
-                    if context.get("messages_clear"):
-                        self.messages_clear = True
-                        self.console.print("[info]Conversation cleared.[/info]")
-
-                    if context.get("should_exit"):
-                        self.should_exit = True
-
-                    if result:
-                        self.console.print(Markdown(result))
-                    continue
-
-                # Auto-compact check before processing
-                compact_state = self.compact_manager.should_compact(self.query_engine.mutable_messages)
-                if compact_state["is_at_blocking"]:
-                    self.console.print(
-                        f"[yellow]⚡ Context at {compact_state['usage_ratio']:.0%} — compacting...[/yellow]"
-                    )
-                    self.query_engine.mutable_messages = self.compact_manager.compact_messages(
-                        self.query_engine.mutable_messages, keep_recent=15,
-                    )
-                    new_state = self.compact_manager.should_compact(self.query_engine.mutable_messages)
-                    self.console.print(
-                        f"[dim]   → {new_state['token_count']:,} tokens "
-                        f"({new_state['usage_ratio']:.0%} of {new_state['context_limit']:,})[/dim]"
-                    )
-                elif compact_state["is_at_warning"]:
-                    self.console.print(
-                        f"[dim]⚡ Context at {compact_state['usage_ratio']:.0%} "
-                        f"({compact_state['token_count']:,}/{compact_state['context_limit']:,} tokens)[/dim]"
-                    )
-
-                # Process message with streaming
-                await self._process_message_streaming(user_input)
-
+                await self._process(user_input)
             except KeyboardInterrupt:
-                self.console.print("\n[yellow]Interrupted. Type /exit to quit.[/yellow]")
+                sys.stdout.write("\n")
+                self.should_exit = True
             except EOFError:
                 self.should_exit = True
 
-        self._print_goodbye()
+        self.console.print(f"\n[dim]Session {self.engine.session_id[:8]}... saved.[/dim]")
         save_config(self.config)
 
-    # ── streaming callbacks (lightweight, no Rich formatting) ──
+    # ── Callbacks ──
 
     def _on_token(self, token: str):
-        """Write token directly to stdout for real-time streaming."""
+        self._token_count += 1
         sys.stdout.write(token)
         sys.stdout.flush()
 
     def _on_tool_start(self, name: str, activity: str):
-        """Tool start — print activity line."""
-        sys.stdout.write(f"\n🔧 {activity} ")
-        sys.stdout.flush()
+        self._tool_start_time = time.time()
+        # End thinking line if active
+        if self._thinking_start > 0:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            self._thinking_start = 0
 
     def _on_tool_end(self, name: str, preview: str):
-        """Tool end."""
-        sys.stdout.write("✓\n")
-        sys.stdout.flush()
+        pass  # Formatting handled in _process
 
-    # ── streaming message processing ──
+    # ── Processing ──
 
-    async def _process_message_streaming(self, prompt: str):
-        """Process a message with real-time streaming display."""
+    async def _process(self, prompt: str):
         if self.messages_clear:
-            self.query_engine.mutable_messages = []
+            self.engine.mutable_messages = []
             self.messages_clear = False
+
+        self._token_count = 0
+        self._thinking_start = time.time()
+        thinking_emitted = False
+        tool_result_lines: list[str] = []
+        current_tool = None
+        streamed = ""
 
         sys.stdout.write("\n")
         sys.stdout.flush()
 
-        streamed_text = ""
-
         try:
-            async for event in self.query_engine.submit_message(prompt):
+            async for event in self.engine.submit_message(prompt):
                 etype = event.get("type", "")
 
                 if etype == "token":
-                    streamed_text += event.get("content", "")
-                    # Already printed via _on_token callback
+                    tok = event.get("content", "")
+                    streamed += tok
+                    if not thinking_emitted and self._thinking_start > 0:
+                        # Emit thinking line before first real token
+                        elapsed = time.time() - self._thinking_start
+                        if elapsed > 0.5:  # Only show if thinking took >500ms
+                            sys.stdout.write(f"\n⏺ Thinking… ({elapsed:.0f}s · ↓ {self.engine.total_usage.get('output_tokens', 0):,} tokens)\n")
+                            sys.stdout.flush()
+                            thinking_emitted = True
+                    if thinking_emitted or self._thinking_start == 0:
+                        sys.stdout.write(tok)
+                        sys.stdout.flush()
 
                 elif etype == "tool_start":
-                    pass  # Already printed via _on_tool_start callback
+                    name = event.get("name", "")
+                    activity = event.get("activity", name)
+                    # Get tool for proper formatting
+                    native = None
+                    for t in self.engine.tools:
+                        if t.name == name or name in (t.aliases or []):
+                            native = t; break
+
+                    # Build Claude Code call line
+                    call_line = self._format_call(native, name, activity)
+                    sys.stdout.write(f"\n⏺ {call_line}\n")
+                    sys.stdout.flush()
+                    current_tool = name
 
                 elif etype == "tool_end":
-                    pass  # Already printed via _on_tool_end callback
+                    name = event.get("name", "")
+                    result_data = event.get("result_preview", "")
+                    # Build Claude Code result line
+                    result_line = self._format_result(name, result_data)
+                    sys.stdout.write(f"  ⎿  {result_line}\n")
+                    sys.stdout.flush()
+                    current_tool = None
 
                 elif etype == "result":
-                    # Only print result via Rich if it wasn't already streamed
-                    final_text = event.get("result", "")
-                    if final_text and final_text not in streamed_text:
-                        # Token-by-token streaming didn't cover this (e.g. short responses)
-                        sys.stdout.write("\n")
-                        sys.stdout.flush()
-                        self.console.print(Markdown(final_text))
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
 
-                    # Show metadata
+                    # Show timing
                     duration = event.get("duration_ms", 0) / 1000
                     turns = event.get("num_turns", 0)
                     usage = event.get("usage", {})
-                    meta_parts = [f"{turns} turns", f"{duration:.1f}s"]
                     tok_in = usage.get("input_tokens", 0)
                     tok_out = usage.get("output_tokens", 0)
-                    if tok_in > 0 or tok_out > 0:
-                        meta_parts.append(f"{tok_in:,}↑ {tok_out:,}↓ tokens")
-                    self.console.print(f"[dim]({' | '.join(meta_parts)})[/dim]")
+
+                    # Claude Code timing line
+                    timing_parts = [f"{duration:.1f}s"]
+                    if turns > 0: timing_parts.append(f"{turns} turns")
+                    if tok_in > 0: timing_parts.append(f"↓ {tok_out:,} tokens")
+                    self.console.print(f"[dim]  ⏺ {', '.join(timing_parts)}[/dim]")
 
                     errors = event.get("errors", [])
                     for err in errors:
-                        self.console.print(f"[error]Error: {err}[/error]")
-
+                        self.console.print(f"[red]  Error: {err}[/red]")
                     break
 
         except Exception as e:
-            self.console.print(f"\n[error]Error: {str(e)}[/error]")
+            self.console.print(f"\n[red]Error: {str(e)}[/red]")
 
-    # ── welcome / goodbye ──
+    def _format_call(self, tool, name: str, activity: str) -> str:
+        """Format tool call like: Write(file.py) or Bash(ls -la)"""
+        if tool:
+            try:
+                # Use format_call from tool if available
+                return tool.format_call({}) if tool.format_call({}) != tool.name else f"{name}({activity})"
+            except:
+                pass
+        return f"{name}({activity})"
+
+    def _format_result(self, name: str, data: str) -> str:
+        """Format result as single line summary, matching Claude Code style."""
+        if not data: return "done"
+        text = str(data).strip()
+        # Try JSON parse for structured results
+        if text.startswith("{"):
+            try:
+                import json
+                obj = json.loads(text)
+                if "status" in obj: return obj["status"]
+                if "count" in obj:
+                    return f"{obj['count']} results"
+                if "exit_code" in obj:
+                    lines = (obj.get("stdout","") + obj.get("stderr","")).strip().split("\n")
+                    return lines[0][:100] if lines and lines[0] else f"exit={obj['exit_code']}"
+            except: pass
+        lines = text.split("\n")
+        return lines[0][:120] if lines else text[:120]
 
     def _print_welcome(self):
         from .. import __version__
-
-        provider_display = {"deepseek": "DeepSeek", "anthropic": "Anthropic"}.get(
-            self.config.provider, self.config.provider
-        )
-        sid = self.query_engine.session_id[:8]
-
+        provider = {"deepseek": "DeepSeek", "anthropic": "Anthropic"}.get(self.config.provider, self.config.provider)
         self.console.print(Panel(
-            f"[bold]db-claude v{__version__}[/bold] — Intelligent Coding Agent\n"
-            f"Built with LangChain + LangGraph\n\n"
-            f"Provider: [bold]{provider_display}[/bold]\n"
-            f"Model:    [bold]{self.config.model}[/bold]\n"
-            f"Session:  {sid}...\n"
-            f"Perms:    {self.config.permission_mode}\n\n"
-            "Type [bold]/help[/bold] for commands. [bold]/session[/bold] to manage sessions.",
-            border_style="bold blue", title="Welcome",
+            f"[bold]db-claude v{__version__}[/bold]\n"
+            f"{provider} · {self.config.model} · {self.config.permission_mode} mode\n"
+            "Type [bold]/help[/bold] for commands.",
+            border_style="bold blue", title="db-claude",
         ))
-
-    def _print_goodbye(self):
-        sid = self.query_engine.session_id[:8]
-        self.console.print(f"\n[dim]Session {sid}... saved. Goodbye![/dim]\n")

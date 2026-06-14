@@ -133,6 +133,32 @@ def parse_args():
     return parser.parse_args()
 
 
+def _format_tool_result(name: str, data: str) -> str:
+    """Claude Code style: single-line result summary."""
+    if not data: return "done"
+    text = str(data).strip()
+    # Try to parse JSON
+    if text.startswith("{"):
+        try:
+            import json
+            obj = json.loads(text)
+            if "status" in obj:
+                return obj["status"]
+            if "count" in obj:
+                return f"{obj['count']} results"
+            if "exit_code" in obj:
+                lines = (obj.get("stdout", "") + obj.get("stderr", "")).strip().split("\n")
+                return lines[0][:100] if lines and lines[0] else f"exit={obj['exit_code']}"
+        except: pass
+    # Clean text
+    lines = text.split("\n")
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith("{") and not line.startswith("["):
+            return line[:120] + ("..." if len(line) > 120 else "")
+    return lines[0][:120] if lines else text[:120]
+
+
 def _build_engine(args, config, non_interactive: bool = False, resume_sid: str = None) -> QueryEngine:
     """Build a QueryEngine from args + config."""
     tools = create_default_tools()
@@ -206,18 +232,30 @@ async def run_print_mode(args, config, resume_sid: str = None):
 
     try:
         final_result = None
+        current_tool = None
         async for event in engine.submit_message(prompt):
-            if event.get("type") == "token":
-                # Print tokens immediately for streaming output
-                print(event.get("content", ""), end="", flush=True)
-            elif event.get("type") == "result":
+            etype = event.get("type", "")
+            if etype == "token":
+                sys.stdout.write(event.get("content", ""))
+                sys.stdout.flush()
+            elif etype == "tool_start":
+                call_display = event.get("call_display", event.get("name", ""))
+                activity = event.get("activity", "")
+                display = call_display if call_display and call_display != event.get("name", "") else f"{event.get('name', '')}({activity})"
+                print(f"\n⏺ {display}")
+                current_tool = event.get("name", "")
+            elif etype == "tool_end":
+                preview = event.get("result_preview", "")
+                result_line = _format_tool_result(event.get("name", ""), preview)
+                print(f"  ⎿  {result_line}")
+                current_tool = None
+            elif etype == "result":
                 final_result = event
 
         if final_result is None:
             print("Error: no result received", file=sys.stderr)
             sys.exit(1)
 
-        # Print a final newline after streaming
         print()
 
         text = final_result.get("result", "")
