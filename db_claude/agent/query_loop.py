@@ -11,7 +11,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from .state import AgentState, create_initial_state
 from .system_prompt import build_system_prompt, get_user_context, get_system_context
-from ..utils.session import save_session
+from ..utils.session import save_session, enqueue_write, _serialize, flush_session_now
 from ..context.compact import CompactManager
 
 
@@ -59,7 +59,9 @@ class QueryEngine:
     @property
     def session_id(self) -> str: return self._session_id
 
-    def set_session_id(self, sid: str): self._session_id = sid
+    def set_session_id(self, sid: str):
+        self._session_id = sid
+        self._graph = None  # Invalidate cached graph — new session needs new checkpointer
 
     async def _get_system_prompt(self) -> str:
         parts = await build_system_prompt(
@@ -219,7 +221,11 @@ class QueryEngine:
         workflow.add_conditional_edges("agent", router, {"tools": "tools", "end": END})
         workflow.add_edge("tools", "agent")
 
-        self._graph = workflow.compile(checkpointer=MemorySaver())
+        # MemorySaver — within-run state. Cross-session persistence handled by
+        # utils/session.py (JSON files in ~/.db-claude/sessions/).
+        # On /resume, messages are restored into mutable_messages before graph runs.
+        checkpointer = MemorySaver()
+        self._graph = workflow.compile(checkpointer=checkpointer)
         return self._graph
 
     async def submit_message(self, prompt: str, options: dict = None):
@@ -227,7 +233,13 @@ class QueryEngine:
         start_time = datetime.now()
         sys_prompt = await self._get_system_prompt()
 
-        self.mutable_messages.append(HumanMessage(content=prompt))
+        user_msg = HumanMessage(content=prompt)
+        self.mutable_messages.append(user_msg)
+
+        # ── Write user message BEFORE API call ──
+        # Claude Code pattern: write now so --resume works even if process
+        # is killed during the API call. Fire-and-forget for responsiveness.
+        enqueue_write(self._session_id, _serialize(user_msg))
 
         initial_state = create_initial_state(
             messages=list(self.mutable_messages),
@@ -308,6 +320,8 @@ class QueryEngine:
                         break
 
             if self._auto_save and self.mutable_messages:
+                # Flush pending deferred writes, then write full transcript
+                flush_session_now(self._session_id)
                 save_session(self._session_id, self.mutable_messages, metadata={
                     "model": self.model_name, "provider": self.provider,
                     "cwd": self.cwd, "usage": self.total_usage,
