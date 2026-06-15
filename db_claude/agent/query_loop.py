@@ -13,6 +13,7 @@ from .state import AgentState, create_initial_state
 from .system_prompt import build_system_prompt, get_user_context, get_system_context
 from ..utils.session import save_session, enqueue_write, _serialize, flush_session_now
 from ..context.compact import CompactManager
+from ..utils.file_cache import FileStateCache, memoized
 
 
 class QueryEngine:
@@ -53,6 +54,8 @@ class QueryEngine:
         self._auto_save = True
         self._compact = CompactManager(model_name=model_name)
         self._graph = None
+        self._file_cache = FileStateCache(max_entries=100, max_size_bytes=25 * 1024 * 1024)
+        self._result_temp_dir = os.path.join(os.path.expanduser("~/.db-claude"), "tool_results")
 
     def interrupt(self): self._abort = True
 
@@ -169,6 +172,23 @@ class QueryEngine:
                         content = json.dumps(result_data, ensure_ascii=False, indent=2) if not isinstance(result_data, str) else result_data
                     except Exception as e:
                         content = f"Error: {str(e)}"
+
+                    # ── Tool result budget (Claude Code: maxResultSizeChars) ──
+                    max_chars = getattr(native_tool, "max_result_chars", 50_000)
+                    if max_chars != float("inf") and len(content) > max_chars:
+                        os.makedirs(self._result_temp_dir, exist_ok=True)
+                        result_file = os.path.join(self._result_temp_dir, f"result_{tool_call_id[:12]}.txt")
+                        try:
+                            with open(result_file, "w", encoding="utf-8") as f:
+                                f.write(content)
+                            content = (
+                                f"[Tool result too large ({len(content):,} chars > {max_chars:,} limit). "
+                                f"Full content saved to {result_file}. Preview (first 500 chars):\n"
+                                f"{content[:500]}...\n\n"
+                                f"Use Read to access the full result if needed."
+                            )
+                        except Exception:
+                            content = content[:max_chars] + f"\n...[truncated at {max_chars} chars]"
                 else:
                     lc_tool = tool_map.get(tool_name)
                     if lc_tool:

@@ -209,6 +209,23 @@ def get_tool_list_section(tools: list) -> str:
     return "\n".join(lines)
 
 
+def _read_claude_md(cwd: str) -> Optional[str]:
+    """Read CLAUDE.md from project root (Claude Code: loadClaudeMd)."""
+    if not cwd:
+        return None
+    claude_md_path = os.path.join(cwd, "CLAUDE.md")
+    if not os.path.exists(claude_md_path):
+        return None
+    try:
+        with open(claude_md_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        if len(content) > 10000:
+            content = content[:10000] + "\n... [CLAUDE.md truncated]"
+        return content
+    except Exception:
+        return None
+
+
 async def build_system_prompt(
     tools: list,
     model: str = "claude-sonnet-4-6",
@@ -222,6 +239,9 @@ async def build_system_prompt(
     Build the complete system prompt as a list of sections.
     Mirrors getSystemPrompt() in constants/prompts.ts and fetchSystemPromptParts() in utils/queryContext.ts.
     """
+    # Inject CLAUDE.md if present
+    claude_md_content = _read_claude_md(cwd) if cwd else None
+
     if custom_system_prompt is not None:
         prompt_parts = [custom_system_prompt]
     else:
@@ -232,6 +252,7 @@ async def build_system_prompt(
             "",
             get_environment_section(cwd, additional_working_directories or []),
             "",
+            *([f"# Project Instructions (CLAUDE.md)\n\n{claude_md_content}", ""] if claude_md_content else []),
             get_tool_usage_section(),
             "",
             get_context_management_section(),

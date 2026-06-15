@@ -47,6 +47,11 @@ class Tool(ABC):
         s = str(data)
         return s[:200] + ("..." if len(s) > 200 else "")
 
+    # ── Result budget (Claude Code: maxResultSizeChars) ──
+    # Default 50KB. Read tool overrides to Infinity.
+    # Results exceeding this are saved to disk; model sees preview + path.
+    max_result_chars: int = 50_000
+
     # ── Standard methods ──
 
     def is_enabled(self) -> bool: return True

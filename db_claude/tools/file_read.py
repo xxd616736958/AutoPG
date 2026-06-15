@@ -11,6 +11,7 @@ class FileReadInput(BaseModel):
 
 class FileReadTool(Tool):
     name = "Read"; aliases = []; search_hint = "read file contents"
+    max_result_chars = float("inf")  # Never redirect Read results (circular dependency)
 
     def input_schema(self) -> Type[BaseModel]: return FileReadInput
 

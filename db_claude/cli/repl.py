@@ -4,6 +4,7 @@ REPL interface — Claude Code output style: ⏺ tool calls, ⎿ results, timing
 import os, sys, asyncio, time
 from typing import Optional
 from prompt_toolkit import PromptSession
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 from prompt_toolkit.formatted_text import HTML
@@ -60,11 +61,18 @@ class ReplInterface:
         self.engine.on_tool_start = self._on_tool_start
         self.engine.on_tool_end = self._on_tool_end
 
+        # Key bindings for multiline (Shift+Enter inserts newline)
+        kb = KeyBindings()
+        @kb.add("s-enter")
+        def _(event): event.app.current_buffer.insert_text("\n")
+
         session = PromptSession(history=FileHistory(self._get_history_path()), style=CLI_STYLE,
-                                completer=CommandCompleter(self.cmd) if self.cmd else None)
+                                completer=CommandCompleter(self.cmd) if self.cmd else None,
+                                multiline=True, key_bindings=kb,
+                                prompt_continuation=" " * 3)
         while not self.should_exit:
             try:
-                user_input = await session.prompt_async(HTML("<prompt>❯ </prompt>"), multiline=False)
+                user_input = await session.prompt_async(HTML("<prompt>❯ </prompt>"))
                 if not user_input.strip(): continue
                 if self.cmd and user_input.strip().startswith("/"):
                     ctx = {"config": self.config, "query_engine": self.engine, "memory_manager": MemoryManager(),
@@ -223,7 +231,15 @@ class ReplInterface:
 
     def _on_token(self, token: str):
         self._token_count += 1
-        # Tokens are printed by _process event loop — do NOT double-write here
+        if self._thinking_start > 0:
+            elapsed = time.time() - self._thinking_start
+            if elapsed > 1.0 and self._token_count == 1:
+                # First token after 1s — show cerebrating indicator
+                out_tokens = self.engine.total_usage.get("output_tokens", 0)
+                sys.stdout.write(f"\n⏺ Cerebrating… ({elapsed:.0f}s · ↓ {out_tokens:,} tokens)\n")
+                sys.stdout.flush()
+            self._thinking_start = 0
+        # Tokens printed by _process event loop
 
     def _on_tool_start(self, name: str, activity: str):
         self._tool_start_time = time.time()
