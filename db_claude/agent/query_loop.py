@@ -56,11 +56,15 @@ class QueryEngine:
         self._auto_save = True
         self._compact = CompactManager(model_name=model_name, provider=provider,
                                         api_key=api_key, base_url=base_url)
+        self._child_engines: list['QueryEngine'] = []  # For interrupt propagation
         self._graph = None
         self._file_cache = FileStateCache(max_entries=100, max_size_bytes=25 * 1024 * 1024)
         self._result_temp_dir = os.path.join(os.path.expanduser("~/.db-claude"), "tool_results")
 
-    def interrupt(self): self._abort = True
+    def interrupt(self):
+        self._abort = True
+        for child in self._child_engines:
+            child.interrupt()
 
     def cleanup(self):
         """Clean up session temp files (Claude Code: cleanup on session exit)."""
@@ -192,7 +196,8 @@ class QueryEngine:
 
                 if native_tool:
                     try:
-                        ctx = {"cwd": self.cwd, "permission_mode": self.permission_mode, "file_cache": self._file_cache}
+                        ctx = {"cwd": self.cwd, "permission_mode": self.permission_mode,
+                               "file_cache": self._file_cache, "_parent_engine": self}
                         result = await native_tool.call(tool_args, ctx)
                         result_data = result.get("data", result) if isinstance(result, dict) else result
                         content = json.dumps(result_data, ensure_ascii=False, indent=2) if not isinstance(result_data, str) else result_data

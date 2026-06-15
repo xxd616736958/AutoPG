@@ -163,21 +163,28 @@ When the conversation grows long, some or all of the current context is summariz
 
 
 def get_agent_tool_section() -> str:
-    """Mirrors the Agent tool section from prompts.ts."""
-    return """# Agent Tool
+    """Mirrors the Agent tool section from prompts.ts. Dynamically includes available agents."""
+    from ..agent.tools.agent_definitions import list_available_agents
+
+    agents = list_available_agents()
+    agent_lines = []
+    for a in agents:
+        agent_lines.append(f"- **{a.agent_type}**: {a.description}")
+        if a.when_to_use:
+            agent_lines.append(f"  When: {a.when_to_use}")
+
+    return f"""# Agent Tool
 You have access to an Agent tool that can spawn subagents for parallel work or complex multi-step tasks.
 
 ## When to use
 Reach for this when the task matches an available agent type, when you have independent work to run in parallel, or when answering would mean reading across several files — delegate it and you keep the conclusion, not the file dumps.
 
-Available agent types:
-- **general-purpose**: For complex questions, code search, and multi-step tasks.
-- **Explore**: Read-only search agent for broad fan-out searches across files/directories.
-- **Plan**: Software architect agent for designing implementation plans.
-- **claude-code-guide**: For questions about Claude Code features and usage.
+## Available agent types:
+{chr(10).join(agent_lines)}
 
 ## Subagent isolation
-Use `isolation: "worktree"` to give the agent its own git worktree for parallel file mutations without conflicts."""
+Use `isolation: "worktree"` to give the agent its own git worktree for parallel file mutations without conflicts.
+Use `run_in_background: true` to run the agent asynchronously — you'll be notified when it completes."""
 
 
 def get_tool_list_section(tools: list) -> str:
