@@ -13,6 +13,7 @@ from .state import AgentState, create_initial_state
 from .system_prompt import build_system_prompt, get_user_context, get_system_context
 from ..utils.session import save_session, enqueue_write, _serialize, flush_session_now
 from ..context.compact import CompactManager
+from ..context.collapse import ContextCollapseManager
 from ..utils.file_cache import FileStateCache
 
 
@@ -56,6 +57,8 @@ class QueryEngine:
         self._auto_save = True
         self._compact = CompactManager(model_name=model_name, provider=provider,
                                         api_key=api_key, base_url=base_url)
+        self._collapse = ContextCollapseManager(self._session_id, provider=provider,
+                                                 api_key=api_key, base_url=base_url)
         self._child_engines: list['QueryEngine'] = []  # For interrupt propagation
         self._graph = None
         self._file_cache = FileStateCache(max_entries=100, max_size_bytes=25 * 1024 * 1024)
@@ -80,7 +83,9 @@ class QueryEngine:
 
     def set_session_id(self, sid: str):
         self._session_id = sid
-        self._graph = None  # Invalidate cached graph — new session needs new checkpointer
+        self._graph = None
+        self._collapse = ContextCollapseManager(sid, provider=self.provider,
+                                                 api_key=self.api_key, base_url=self.base_url)
 
     async def _get_system_prompt(self) -> str:
         parts = await build_system_prompt(
@@ -130,6 +135,17 @@ class QueryEngine:
                 return {"should_continue": False}
 
             messages = list(state.get("messages", []))
+            turn = state.get("turn_count", 0)
+
+            # ── Context Collapse (Claude Code: applyCollapsesIfNeeded) ──
+            # Runs BEFORE auto-compact. Projects collapsed view over full history.
+            if self._collapse.is_enabled() and len(messages) > 20:
+                collapse_result = await self._collapse.apply_collapses_if_needed(
+                    messages, turn,
+                )
+                if collapse_result.get("changed"):
+                    messages = collapse_result["messages"]
+
             sys_msg = SystemMessage(content=state.get("system_prompt", ""))
             full_messages = [sys_msg] + messages
 
