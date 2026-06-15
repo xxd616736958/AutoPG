@@ -46,6 +46,7 @@ class QueryEngine:
         self.on_stream_token = on_stream_token
         self.on_tool_start = on_tool_start
         self.on_tool_end = on_tool_end
+        self.on_permission_check = on_permission_check
 
         self.mutable_messages: list = initial_messages or []
         self.permission_denials: list = []
