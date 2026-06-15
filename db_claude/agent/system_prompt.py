@@ -6,6 +6,7 @@ import os
 import platform
 from datetime import datetime
 from typing import Optional
+from ..utils.file_cache import memoized
 
 
 CYBER_RISK_INSTRUCTION = (
@@ -279,8 +280,9 @@ async def build_system_prompt(
     return prompt_parts
 
 
+@memoized(ttl=None)
 async def get_user_context() -> dict:
-    """Build user context — mirrors getUserContext() in context.ts."""
+    """Build user context — mirrors getUserContext() in context.ts (lodash memoize)."""
     return {
         "platform": platform.system(),
         "cwd": os.getcwd(),
@@ -290,6 +292,7 @@ async def get_user_context() -> dict:
     }
 
 
+@memoized(ttl=None)
 async def get_system_context() -> dict:
-    """Build system context — mirrors getSystemContext() in context.ts."""
+    """Build system context — mirrors getSystemContext() in context.ts (lodash memoize)."""
     return {}

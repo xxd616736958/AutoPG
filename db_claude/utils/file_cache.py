@@ -61,7 +61,7 @@ MEMO_TTL = 5.0  # 5 second TTL — long enough for a turn, short enough to catch
 
 
 def memoized(ttl: float = MEMO_TTL):
-    """Decorator: memoize async function result for `ttl` seconds."""
+    """Decorator: memoize async function result. ttl=None = permanent (lodash style)."""
     def deco(fn):
         @functools.wraps(fn)
         async def wrapper(*args, **kwargs):
@@ -69,7 +69,7 @@ def memoized(ttl: float = MEMO_TTL):
             now = time.time()
             if key in _memo_store:
                 ts, val = _memo_store[key]
-                if now - ts < ttl:
+                if ttl is None or now - ts < ttl:
                     return val
             result = await fn(*args, **kwargs)
             _memo_store[key] = (now, result)

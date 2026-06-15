@@ -60,9 +60,17 @@ class ReplInterface:
         self.engine.on_tool_start = self._on_tool_start
         self.engine.on_tool_end = self._on_tool_end
 
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.keys import Keys
+
+        kb = KeyBindings()
+        @kb.add("escape", "enter")  # Meta+Enter / Alt+Enter to submit
+        def _(event):
+            event.app.current_buffer.validate_and_handle()
+
         session = PromptSession(history=FileHistory(self._get_history_path()), style=CLI_STYLE,
                                 completer=CommandCompleter(self.cmd) if self.cmd else None,
-                                multiline=True,
+                                multiline=True, key_bindings=kb,
                                 prompt_continuation="   ")
         while not self.should_exit:
             try:

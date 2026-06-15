@@ -10,14 +10,10 @@ from langchain_core.messages import (
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from .state import AgentState, create_initial_state
-from .system_prompt import build_system_prompt, get_user_context as _get_user_context, get_system_context as _get_system_context
+from .system_prompt import build_system_prompt, get_user_context, get_system_context
 from ..utils.session import save_session, enqueue_write, _serialize, flush_session_now
 from ..context.compact import CompactManager
-from ..utils.file_cache import FileStateCache, memoized
-
-# Memoize user/system context — they don't change within a session
-get_user_context = memoized(ttl=30)(_get_user_context)
-get_system_context = memoized(ttl=30)(_get_system_context)
+from ..utils.file_cache import FileStateCache
 
 
 class QueryEngine:
