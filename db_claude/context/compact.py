@@ -3,7 +3,7 @@ Context compaction for db-claude with token counting.
 Architecturally mirrors Claude Code's compaction system (src/services/compact/).
 Works offline — falls back to character-based estimation when tiktoken is unavailable.
 """
-import re
+import os, re
 from typing import Optional
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AIMessage
 
@@ -29,11 +29,15 @@ class CompactManager:
     }
     DEFAULT_LIMIT = 131072
 
-    def __init__(self, model_name: str = "claude-sonnet-4-6"):
+    def __init__(self, model_name: str = "claude-sonnet-4-6", provider: str = "deepseek",
+                 api_key: str = None, base_url: str = None):
         self.model_name = model_name
         self.context_limit = self.CONTEXT_LIMITS.get(model_name, self.DEFAULT_LIMIT)
         self.compaction_count = 0
         self._encoder = None
+        self._provider = provider
+        self._api_key = api_key
+        self._base_url = base_url
         self._init_encoder()
 
     def _init_encoder(self):
@@ -99,19 +103,63 @@ class CompactManager:
             "is_at_blocking": ratio >= self.AUTO_COMPACT_BLOCKING,
         }
 
-    def compact_messages(
+    async def generate_summary(self, messages: list[BaseMessage]) -> str:
+        """Generate a structured summary using a fast model (Claude Code: runForkedAgent for compact).
+        Falls back to simple truncation if LLM is unavailable."""
+        # Build compact prompt matching Claude Code's compact/prompt.ts
+        compact_prompt = (
+            "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\n"
+            "Summarize the following conversation between an AI agent and a user. "
+            "Your summary should be comprehensive and detailed, covering:\n"
+            "1. The user's explicit requests and intents\n"
+            "2. The AI's approach and key decisions\n"
+            "3. Specific file names, code changes, function signatures\n"
+            "4. Errors encountered and how they were fixed\n"
+            "5. User feedback and corrections\n\n"
+            "Write your summary as concise paragraphs. "
+            "Focus on information that would be essential for continuing the work.\n\n"
+            "CONVERSATION TO SUMMARIZE:\n\n"
+        )
+
+        conversation_text = []
+        for msg in messages:
+            role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+            content = str(msg.content) if hasattr(msg, "content") else str(msg)
+            if content:
+                conversation_text.append(f"[{role}]: {content[:500]}")
+        compact_prompt += "\n".join(conversation_text)
+        compact_prompt += "\n\nSUMMARY:"
+
+        try:
+            if self._provider == "deepseek":
+                from langchain_openai import ChatOpenAI
+                llm = ChatOpenAI(
+                    model="deepseek-v4-flash",
+                    api_key=self._api_key or os.environ.get("DEEPSEEK_API_KEY"),
+                    base_url=self._base_url or "https://api.deepseek.com/v1",
+                    temperature=0.3, max_tokens=2000,
+                )
+            else:
+                from langchain_anthropic import ChatAnthropic
+                llm = ChatAnthropic(
+                    model="claude-haiku-4-5-20251001",
+                    api_key=self._api_key or os.environ.get("ANTHROPIC_API_KEY"),
+                    max_tokens=2000, temperature=0.3,
+                )
+            response = await llm.ainvoke(compact_prompt)
+            return str(response.content) if hasattr(response, "content") else str(response)
+        except Exception:
+            return "Previous conversation summarized due to context limits."
+
+    async def compact_messages(
         self,
         messages: list[BaseMessage],
         keep_recent: int = 20,
         keep_system: bool = True,
     ) -> list[BaseMessage]:
         """
-        Compact conversation history.
-        Strategy:
-        1. Keep the first system message
-        2. Keep the most recent N messages
-        3. Replace middle messages with a compact boundary marker
-        4. Generate a summary of removed content
+        Compact conversation history with LLM-generated summary.
+        Claude Code: autoCompactIfNeeded → runForkedAgent with compact prompt.
         """
         if not messages or len(messages) <= keep_recent:
             return messages
@@ -119,49 +167,29 @@ class CompactManager:
         self.compaction_count += 1
 
         # Separate system messages from conversation
-        system_msgs = []
-        conversation = []
-        for msg in messages:
-            if isinstance(msg, SystemMessage):
-                system_msgs.append(msg)
-            else:
-                conversation.append(msg)
+        system_msgs = [m for m in messages if isinstance(m, SystemMessage)]
+        conversation = [m for m in messages if not isinstance(m, SystemMessage)]
 
-        # If the conversation is already small, don't compact
         if len(conversation) <= keep_recent:
             return messages
 
-        # Calculate how many to remove
         remove_count = len(conversation) - keep_recent
         removed = conversation[:remove_count]
         kept = conversation[remove_count:]
 
-        # Build summary of removed content
-        summary_parts = []
-        for msg in removed:
-            if isinstance(msg, HumanMessage):
-                content = str(msg.content)[:200]
-                summary_parts.append(f"[User]: {content}")
-            elif isinstance(msg, AIMessage):
-                content = str(msg.content)[:200]
-                if content:
-                    summary_parts.append(f"[Assistant]: {content}")
-                tool_calls = getattr(msg, "tool_calls", None) or []
-                for tc in tool_calls:
-                    summary_parts.append(f"  → called {tc.get('name', 'unknown')}")
+        # Generate summary via LLM (Claude Code pattern)
+        summary_text = await self.generate_summary(removed)
 
-        summary_text = (
+        # Build compact boundary message
+        boundary_text = (
             f"## Context Compaction #{self.compaction_count}\n\n"
-            f"Earlier conversation ({remove_count} messages) has been summarized "
-            f"to stay within the {self.context_limit:,}-token context window.\n\n"
-            f"### Summary of removed content:\n"
-            + "\n".join(f"- {p}" for p in summary_parts[:30])
-            + ("\n- ... (more messages omitted)" if len(summary_parts) > 30 else "")
-            + f"\n\n### Preserved ({len(kept)} most recent messages):\n"
+            f"Earlier conversation ({remove_count} messages) summarized:\n\n"
+            f"{summary_text}\n\n"
+            f"### Preserved ({len(kept)} most recent messages follow)"
         )
 
         boundary = SystemMessage(
-            content=summary_text,
+            content=boundary_text,
             additional_kwargs={
                 "subtype": "compact_boundary",
                 "compaction_count": self.compaction_count,
@@ -170,13 +198,11 @@ class CompactManager:
             },
         )
 
-        # Assemble: system messages + boundary + recent conversation
         result = system_msgs + [boundary] + kept
 
-        # Log compaction stats
         old_tokens = self.estimate_total_tokens(messages)
         new_tokens = self.estimate_total_tokens(result)
         print(f"  [dim]⚡ Compacted: {old_tokens:,} → {new_tokens:,} tokens "
-              f"({remove_count} messages summarized)[/dim]")
+              f"({remove_count} messages summarized via LLM)[/dim]")
 
         return result

@@ -33,6 +33,7 @@ class QueryEngine:
         on_stream_token: Optional[Callable[[str], None]] = None,
         on_tool_start: Optional[Callable[[str, str], None]] = None,
         on_tool_end: Optional[Callable[[str, str], None]] = None,
+        on_permission_check: Optional[Callable[[str, bool, str], bool]] = None,
     ):
         self.tools = tools; self.model_name = model_name
         self.fallback_model = fallback_model; self.cwd = cwd
@@ -52,7 +53,8 @@ class QueryEngine:
         self._abort = False
         self._session_id = str(uuid.uuid4())
         self._auto_save = True
-        self._compact = CompactManager(model_name=model_name)
+        self._compact = CompactManager(model_name=model_name, provider=provider,
+                                        api_key=api_key, base_url=base_url)
         self._graph = None
         self._file_cache = FileStateCache(max_entries=100, max_size_bytes=25 * 1024 * 1024)
         self._result_temp_dir = os.path.join(os.path.expanduser("~/.db-claude"), "tool_results")
@@ -166,6 +168,20 @@ class QueryEngine:
                 for t in self.tools:
                     if t.name == tool_name or tool_name in (t.aliases or []):
                         native_tool = t; break
+
+                # ── Permission check (Claude Code: checkPermissions flow) ──
+                is_destructive = native_tool.is_destructive(tool_args) if native_tool else False
+                if is_destructive and self.on_permission_check:
+                    call_display = native_tool.format_call(tool_args) if native_tool else tool_name
+                    activity = native_tool.get_activity_description(tool_args) if native_tool else tool_name
+                    allowed = self.on_permission_check(tool_name, True, activity)
+                    if not allowed:
+                        # Tool denied — push synthetic error result
+                        content = f"Tool '{tool_name}' was denied by user."
+                        if event_queue is not None:
+                            event_queue.put_nowait({"type": "tool_end", "name": tool_name, "result_preview": "denied by user"})
+                        tool_messages.append(ToolMessage(content=content, tool_call_id=tool_call_id, name=tool_name))
+                        continue  # Skip this tool
 
                 # Notify tool start via event bridge
                 call_display = native_tool.format_call(tool_args) if native_tool else tool_name

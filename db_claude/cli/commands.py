@@ -95,6 +95,26 @@ class SlashCommandHandler:
             handler=self._cmd_session,
             aliases=["sessions"],
         ))
+        self.register(SlashCommand(
+            name="review",
+            description="Review the current git diff for bugs and improvements",
+            handler=self._cmd_review,
+        ))
+        self.register(SlashCommand(
+            name="diff",
+            description="Show the current git diff",
+            handler=self._cmd_diff,
+        ))
+        self.register(SlashCommand(
+            name="commit",
+            description="Generate commit message and commit staged changes",
+            handler=self._cmd_commit,
+        ))
+        self.register(SlashCommand(
+            name="model",
+            description="Show or change the current model interactively",
+            handler=self._cmd_model_picker,
+        ))
 
     def register(self, command: SlashCommand):
         """Register a slash command."""
@@ -221,6 +241,69 @@ class SlashCommandHandler:
                 f"  Cache creations: {usage.get('cache_creation_tokens', 0):,}"
             )
         return "No usage data available."
+
+    def _cmd_review(self, args: list, context: dict) -> str:
+        """Review current git diff. Injects prompt into conversation."""
+        context["inject_prompt"] = (
+            "Review the current git diff for correctness bugs and reuse/simplification/efficiency "
+            "improvements. Run `git diff` to see the changes first, then provide a structured review.\n\n"
+            "Check for:\n"
+            "- Correctness bugs and logic errors\n"
+            "- Security issues\n"
+            "- Performance regressions\n"
+            "- Reuse and simplification opportunities\n\n"
+            "Output findings as a structured report with file paths and line references."
+        )
+        return "Reviewing current diff..."
+
+    def _cmd_diff(self, args: list, context: dict) -> str:
+        """Show current git diff."""
+        context["inject_prompt"] = "Run `git diff` and summarize the changes in a concise format."
+        return "Showing diff..."
+
+    def _cmd_commit(self, args: list, context: dict) -> str:
+        """Generate commit message. Injects git safety protocol prompt."""
+        context["inject_prompt"] = (
+            "Follow this git safety protocol to create a commit:\n\n"
+            "1. Run `git status` (no -uall flag) and `git diff --staged` to see staged changes\n"
+            "2. Run `git log --oneline -10` to see recent commit message style\n"
+            "3. Draft a concise commit message (1-2 sentences, focus on 'why')\n"
+            "4. Run `git commit -m \"...\"` with the message\n"
+            "5. Run `git status` to verify\n\n"
+            "IMPORTANT: NEVER amend commits, NEVER force push to main, "
+            "NEVER skip hooks, NEVER commit .env or credential files."
+        )
+        return "Preparing commit..."
+
+    def _cmd_model_picker(self, args: list, context: dict) -> str:
+        """Open interactive model picker."""
+        from prompt_toolkit.shortcuts import radiolist_dialog
+
+        models = [
+            ("deepseek-v4-flash", "deepseek-v4-flash (fast, 128K context)"),
+            ("deepseek-v4-pro", "deepseek-v4-pro (powerful, 128K context)"),
+            ("claude-haiku-4-5-20251001", "Claude Haiku 4.5 (Anthropic)"),
+            ("claude-sonnet-4-6", "Claude Sonnet 4.6 (Anthropic)"),
+            ("claude-opus-4-6", "Claude Opus 4.6 (Anthropic)"),
+        ]
+
+        config = context.get("config")
+        current = config.model if config else "deepseek-v4-flash"
+
+        try:
+            result = radiolist_dialog(
+                title="Select Model",
+                text=f"Current: {current}",
+                values=models,
+            ).run()
+        except Exception:
+            result = None
+
+        if result and config:
+            config.model = result
+            context["engine"] = None  # Signal to rebuild engine
+            return f"Model changed to: {result}"
+        return "Model selection cancelled."
 
     def _cmd_permissions(self, args: list, context: dict) -> str:
         """Show or change permission mode."""

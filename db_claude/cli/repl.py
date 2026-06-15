@@ -59,6 +59,7 @@ class ReplInterface:
         self.engine.on_stream_token = self._on_token
         self.engine.on_tool_start = self._on_tool_start
         self.engine.on_tool_end = self._on_tool_end
+        self.engine.on_permission_check = self._on_permission_check
 
         from prompt_toolkit.key_binding import KeyBindings
         from prompt_toolkit.filters import has_focus
@@ -86,12 +87,17 @@ class ReplInterface:
                 if self.cmd and user_input.strip().startswith("/"):
                     ctx = {"config": self.config, "query_engine": self.engine, "memory_manager": MemoryManager(),
                            "messages_clear": False, "should_exit": False, "session_id": self.engine.session_id,
-                           "open_session_picker": False}
+                           "open_session_picker": False, "inject_prompt": None}
                     result = self.cmd.handle(user_input, ctx)
 
                     # Interactive session picker (Claude Code /resume)
                     if ctx.get("open_session_picker"):
                         await self._do_resume()
+                        continue
+
+                    # Prompt injection (Claude Code: PromptCommand) — e.g. /review /diff /commit
+                    if ctx.get("inject_prompt"):
+                        await self._process(ctx["inject_prompt"])
                         continue
 
                     if ctx.get("messages_clear"): self.messages_clear = True
@@ -102,7 +108,7 @@ class ReplInterface:
                 # Auto-compact check
                 cs = self._compact.should_compact(self.engine.mutable_messages)
                 if cs["is_at_blocking"]:
-                    self.engine.mutable_messages = self._compact.compact_messages(self.engine.mutable_messages, keep_recent=15)
+                    self.engine.mutable_messages = await self._compact.compact_messages(self.engine.mutable_messages, keep_recent=15)
 
                 await self._process(user_input)
             except KeyboardInterrupt:
@@ -261,6 +267,17 @@ class ReplInterface:
 
     def _on_tool_end(self, name: str, preview: str):
         pass  # Formatting handled in _process
+
+    def _on_permission_check(self, tool_name: str, is_destructive: bool, activity: str) -> bool:
+        """Interactive permission confirmation (Claude Code: PermissionDialog)."""
+        sys.stdout.write(f"\n[yellow]⚠ {activity}[/yellow]\n")
+        sys.stdout.write(f"[dim]Allow {tool_name} to proceed? [y/N] [/dim]")
+        sys.stdout.flush()
+        try:
+            reply = input().strip().lower()
+            return reply in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            return False
 
     # ── Processing ──
 
