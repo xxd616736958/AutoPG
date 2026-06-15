@@ -10,10 +10,14 @@ from langchain_core.messages import (
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from .state import AgentState, create_initial_state
-from .system_prompt import build_system_prompt, get_user_context, get_system_context
+from .system_prompt import build_system_prompt, get_user_context as _get_user_context, get_system_context as _get_system_context
 from ..utils.session import save_session, enqueue_write, _serialize, flush_session_now
 from ..context.compact import CompactManager
 from ..utils.file_cache import FileStateCache, memoized
+
+# Memoize user/system context — they don't change within a session
+get_user_context = memoized(ttl=30)(_get_user_context)
+get_system_context = memoized(ttl=30)(_get_system_context)
 
 
 class QueryEngine:
@@ -58,6 +62,15 @@ class QueryEngine:
         self._result_temp_dir = os.path.join(os.path.expanduser("~/.db-claude"), "tool_results")
 
     def interrupt(self): self._abort = True
+
+    def cleanup(self):
+        """Clean up session temp files (Claude Code: cleanup on session exit)."""
+        import shutil
+        if os.path.exists(self._result_temp_dir):
+            try:
+                shutil.rmtree(self._result_temp_dir)
+            except Exception:
+                pass
 
     @property
     def session_id(self) -> str: return self._session_id
@@ -166,7 +179,7 @@ class QueryEngine:
 
                 if native_tool:
                     try:
-                        ctx = {"cwd": self.cwd, "permission_mode": self.permission_mode}
+                        ctx = {"cwd": self.cwd, "permission_mode": self.permission_mode, "file_cache": self._file_cache}
                         result = await native_tool.call(tool_args, ctx)
                         result_data = result.get("data", result) if isinstance(result, dict) else result
                         content = json.dumps(result_data, ensure_ascii=False, indent=2) if not isinstance(result_data, str) else result_data

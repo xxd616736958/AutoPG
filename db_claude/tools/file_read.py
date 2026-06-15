@@ -34,6 +34,13 @@ class FileReadTool(Tool):
         if not os.path.isabs(file_path):
             file_path = os.path.join(context.get("cwd", os.getcwd()), file_path)
         try:
+            # Check file cache first
+            fc = context.get("file_cache")
+            if fc and fc.has(file_path):
+                cached = fc.get(file_path)
+                if cached:
+                    return {"data": cached}
+
             if not os.path.exists(file_path): return {"data": f"Error: File not found: {file_path}"}
             if os.path.isdir(file_path): return {"data": f"Error: Path is a directory: {file_path}"}
             if self._is_binary(file_path): return {"data": f"[Binary file: {os.path.getsize(file_path)} bytes]"}
@@ -51,7 +58,13 @@ class FileReadTool(Tool):
             if len(result_lines) > 2000:
                 result_lines = result_lines[:2000]
                 result_lines.append(f"... [truncated, showing first 2000 of {total} lines]")
-            return {"data": "\n".join(result_lines)}
+            data = "\n".join(result_lines)
+
+            # Cache full-file reads
+            if fc and offset == 0 and limit is None and len(data) < 100_000:
+                fc.set(file_path, data)
+
+            return {"data": data}
         except Exception as e:
             return {"data": f"Error reading file: {str(e)}"}
 

@@ -4,7 +4,6 @@ REPL interface — Claude Code output style: ⏺ tool calls, ⎿ results, timing
 import os, sys, asyncio, time
 from typing import Optional
 from prompt_toolkit import PromptSession
-from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 from prompt_toolkit.formatted_text import HTML
@@ -61,15 +60,10 @@ class ReplInterface:
         self.engine.on_tool_start = self._on_tool_start
         self.engine.on_tool_end = self._on_tool_end
 
-        # Key bindings for multiline (Shift+Enter inserts newline)
-        kb = KeyBindings()
-        @kb.add("s-enter")
-        def _(event): event.app.current_buffer.insert_text("\n")
-
         session = PromptSession(history=FileHistory(self._get_history_path()), style=CLI_STYLE,
                                 completer=CommandCompleter(self.cmd) if self.cmd else None,
-                                multiline=True, key_bindings=kb,
-                                prompt_continuation=" " * 3)
+                                multiline=True,
+                                prompt_continuation="   ")
         while not self.should_exit:
             try:
                 user_input = await session.prompt_async(HTML("<prompt>❯ </prompt>"))
@@ -103,6 +97,7 @@ class ReplInterface:
                 self.should_exit = True
 
         self.console.print(f"\n[dim]Session {self.engine.session_id[:8]}... saved.[/dim]")
+        self.engine.cleanup()
         save_config(self.config)
 
     # ── Session resume with interactive picker ──
