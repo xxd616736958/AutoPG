@@ -109,7 +109,7 @@ async def run_subagent_inline(
     agent_id = str(uuid.uuid4())
     config = create_subagent_context(parent_engine, agent_def, agent_id, prompt)
 
-    from ..agent.query_loop import QueryEngine
+    from ..agent.query_engine import QueryEngine
     sub = QueryEngine(**config)
     sub.set_session_id(agent_id)
 
@@ -164,7 +164,7 @@ async def run_subagent_background(
     _background_agents[agent_id] = state
 
     async def _run():
-        from ..agent.query_loop import QueryEngine
+        from ..agent.query_engine import QueryEngine
         sub = QueryEngine(**config)
         sub.set_session_id(agent_id)
         parent_engine._child_engines.append(sub)

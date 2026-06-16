@@ -311,7 +311,7 @@ class ReplInterface:
 
                 elif etype == "tool_start":
                     name = event.get("name", "")
-                    # Use pre-formatted call_display from query_loop (already format_call(args))
+                    # Use pre-formatted call_display from graph (already format_call(args))
                     call_display = event.get("call_display", "")
                     if not call_display or call_display == name:
                         # Fallback: build from args

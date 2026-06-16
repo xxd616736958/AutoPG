@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db_claude.utils.config import get_global_config, load_config, save_config
 from db_claude.utils.session import resume_messages, list_sessions, load_session, get_last_session_id
 from db_claude.tools import create_default_tools
-from db_claude.agent.query_loop import QueryEngine
+from db_claude.agent.query_engine import QueryEngine
 from db_claude.cli.commands import SlashCommandHandler
 from db_claude.cli.repl import ReplInterface
 from db_claude.context.memory import MemoryManager

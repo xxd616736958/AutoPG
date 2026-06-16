@@ -11,7 +11,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from db_claude.tools import create_default_tools
-from db_claude.agent.query_loop import QueryEngine
+from db_claude.agent.query_engine import QueryEngine
 
 # DeepSeek config
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
