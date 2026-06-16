@@ -70,13 +70,22 @@ class MiddlewareStack:
     async def run_wrap_model_call(self, request: dict, handler) -> Any:
         wrapped = handler
         for mw in reversed(self._mws):
-            inner = wrapped
-            wrapped = lambda r, mw=mw: mw.awrap_model_call(r, inner)
+            prev = wrapped
+            # Use explicit closure to avoid late-binding lambda bug
+            def _make_wrapper(_mw, _prev):
+                async def _w(r):
+                    return await _mw.awrap_model_call(r, _prev)
+                return _w
+            wrapped = _make_wrapper(mw, prev)
         return await wrapped(request)
 
     async def run_wrap_tool_call(self, request: dict, handler) -> Any:
         wrapped = handler
         for mw in reversed(self._mws):
-            inner = wrapped
-            wrapped = lambda r, mw=mw: mw.awrap_tool_call(r, inner)
+            prev = wrapped
+            def _make_wrapper(_mw, _prev):
+                async def _w(r):
+                    return await _mw.awrap_tool_call(r, _prev)
+                return _w
+            wrapped = _make_wrapper(mw, prev)
         return await wrapped(request)

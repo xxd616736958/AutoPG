@@ -19,6 +19,7 @@ def build_agent_graph(
     on_tool_start: Optional[Callable] = None,
     on_tool_end: Optional[Callable] = None,
     on_permission_check: Optional[Callable] = None,
+    middleware_stack=None,  # MiddlewareStack for wrapping tool calls
     file_cache=None,
     result_temp_dir: str = "",
 ) -> 'CompiledStateGraph':
@@ -134,13 +135,33 @@ def build_agent_graph(
             if on_tool_start:
                 on_tool_start(tool_name, activity)
 
-            # Execute tool (permission/cache/budget handled by middleware)
+            # Execute tool through middleware stack (permission/cache/budget)
             if native_tool:
                 try:
-                    ctx = {"file_cache": file_cache, "_parent_engine": None}
-                    result = await native_tool.call(tool_args, ctx)
-                    result_data = result.get("data", result) if isinstance(result, dict) else result
-                    content = json.dumps(result_data, ensure_ascii=False, indent=2) if not isinstance(result_data, str) else result_data
+                    # Build middleware request
+                    mw_request = {
+                        "tool_name": tool_name, "tool_args": tool_args,
+                        "is_destructive": native_tool.is_destructive(tool_args),
+                        "max_result_chars": getattr(native_tool, "max_result_chars", 50_000),
+                        "file_cache": file_cache,
+                        "result_temp_dir": result_temp_dir,
+                        "tool_call_id": tool_call_id,
+                        "on_permission_check": on_permission_check,
+                    }
+
+                    # Define the actual tool call handler
+                    async def _do_call(req):
+                        ctx = {"file_cache": file_cache, "_parent_engine": None}
+                        result = await native_tool.call(req["tool_args"], ctx)
+                        result_data = result.get("data", result) if isinstance(result, dict) else result
+                        return json.dumps(result_data, ensure_ascii=False, indent=2) if not isinstance(result_data, str) else result_data
+
+                    # Wrap through middleware if available
+                    if middleware_stack:
+                        content = await middleware_stack.run_wrap_tool_call(mw_request, _do_call)
+                    else:
+                        content = await _do_call(mw_request)
+
                 except Exception as e:
                     content = f"Error: {str(e)}"
             else:

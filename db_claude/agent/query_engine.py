@@ -100,7 +100,7 @@ class QueryEngine:
         self._session_id = sid
         self._collapse = ContextCollapseManager(sid, self.provider, self.api_key, self.base_url)
         self._stack = _build_default_stack(sid, self.provider, self.api_key, self.base_url)
-        self._graph = None
+        self._graph = None  # Invalidate cached graph (holds old middleware)
 
     def cleanup(self):
         import shutil
@@ -118,6 +118,8 @@ class QueryEngine:
                 on_stream_token=self.on_stream_token,
                 on_tool_start=self.on_tool_start,
                 on_tool_end=self.on_tool_end,
+                on_permission_check=self.on_permission_check,
+                middleware_stack=self._stack,
                 file_cache=self._file_cache,
                 result_temp_dir=self._result_temp_dir,
             )
