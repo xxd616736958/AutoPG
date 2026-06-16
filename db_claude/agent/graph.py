@@ -41,9 +41,11 @@ def build_agent_graph(
         sys_msg = SystemMessage(content=state.get("system_prompt", ""))
         full_messages = [sys_msg] + messages
 
-        # Stream tokens through callback (for real-time display)
+        # Stream tokens — accumulate content AND tool calls across ALL chunks
         accumulated = ""
         full_response = None
+        accumulated_tool_calls: dict[int, dict] = {}  # index → {name, id, args_str}
+
         async for chunk in llm_with_tools.astream(full_messages):
             full_response = chunk
             token = getattr(chunk, "content", "")
@@ -52,11 +54,37 @@ def build_agent_graph(
                 if on_stream_token:
                     on_stream_token(token)
 
+            # Accumulate tool calls from streaming chunks (DeepSeek format)
+            tc_chunks = getattr(chunk, "tool_call_chunks", None) or []
+            for tcc in tc_chunks:
+                idx = tcc.get("index", 0)
+                if idx not in accumulated_tool_calls:
+                    accumulated_tool_calls[idx] = {"name": "", "id": "", "args_str": ""}
+                if tcc.get("name"):
+                    accumulated_tool_calls[idx]["name"] = tcc["name"]
+                if tcc.get("id"):
+                    accumulated_tool_calls[idx]["id"] = tcc["id"]
+                if tcc.get("args"):
+                    accumulated_tool_calls[idx]["args_str"] += tcc["args"]
+
         if full_response is None:
             return {"should_continue": False}
 
-        # Accumulate tool calls from streaming chunks
-        tool_calls = _build_tool_calls(full_response, accumulated, uuid)
+        # Build tool calls: prefer streaming-accumulated, fallback to full_response.tool_calls
+        tool_calls = []
+        for idx in sorted(accumulated_tool_calls.keys()):
+            tc = accumulated_tool_calls[idx]
+            if tc["name"]:
+                try:
+                    args = json.loads(tc["args_str"]) if tc["args_str"] else {}
+                except json.JSONDecodeError:
+                    args = {}
+                tool_calls.append({
+                    "name": tc["name"], "args": args,
+                    "id": tc["id"] or str(uuid.uuid4()), "type": "tool_call",
+                })
+        if not tool_calls:
+            tool_calls = list(getattr(full_response, "tool_calls", []) or [])
 
         # Track usage via runtime callback
         _track_usage(full_response)
@@ -188,37 +216,6 @@ def _find_native_tool(tools: list, name: str):
         if t.name == name or name in (t.aliases or []):
             return t
     return None
-
-
-def _build_tool_calls(full_response, accumulated: str, uuid_mod) -> list:
-    """Build tool calls from streaming chunks (handle DeepSeek tool_call_chunks)."""
-    tool_calls = list(getattr(full_response, "tool_calls", []) or [])
-    if not tool_calls:
-        accumulated_tcs: dict[int, dict] = {}
-        # Check for tool_call_chunks (DeepSeek streaming format)
-        tc_chunks = getattr(full_response, "tool_call_chunks", None) or []
-        for tcc in tc_chunks:
-            idx = tcc.get("index", 0)
-            if idx not in accumulated_tcs:
-                accumulated_tcs[idx] = {"name": "", "id": "", "args_str": ""}
-            if tcc.get("name"):
-                accumulated_tcs[idx]["name"] = tcc["name"]
-            if tcc.get("id"):
-                accumulated_tcs[idx]["id"] = tcc["id"]
-            if tcc.get("args"):
-                accumulated_tcs[idx]["args_str"] += tcc["args"]
-        for idx in sorted(accumulated_tcs.keys()):
-            tc = accumulated_tcs[idx]
-            if tc["name"]:
-                try:
-                    args = json.loads(tc["args_str"]) if tc["args_str"] else {}
-                except json.JSONDecodeError:
-                    args = {}
-                tool_calls.append({
-                    "name": tc["name"], "args": args,
-                    "id": tc["id"] or str(uuid_mod.uuid4()), "type": "tool_call",
-                })
-    return tool_calls
 
 
 def _track_usage(response):
