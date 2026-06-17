@@ -1,91 +1,81 @@
 """
 AgentMiddleware base class + MiddlewareStack.
-Aligns with LangChain's AgentMiddleware API on raw LangGraph StateGraph.
+Aligns with LangChain AgentMiddleware API on raw StateGraph.
+Hooks receive context: AgentContext (not raw dict).
 """
-from typing import Any, Optional
+from typing import Optional, Any
 
 
 class AgentMiddleware:
-    """Base middleware. Each hook returns None (no change) or dict (merge into state).
-    Aligns with langchain.agents.middleware.AgentMiddleware signature."""
+    """Base middleware. Each hook can return None (no change) or dict (merge into state)."""
 
-    # ── before/after hooks (return dict to modify state) ──
-    async def abefore_agent(self, state: dict, runtime: dict) -> Optional[dict]:
+    async def abefore_agent(self, state: dict, context) -> Optional[dict]:
         return None
 
-    async def abefore_model(self, state: dict, runtime: dict) -> Optional[dict]:
+    async def abefore_model(self, state: dict, context) -> Optional[dict]:
         return None
 
-    async def aafter_model(self, state: dict, runtime: dict) -> Optional[dict]:
+    async def aafter_model(self, state: dict, context) -> Optional[dict]:
         return None
 
-    async def aafter_agent(self, state: dict, runtime: dict) -> Optional[dict]:
+    async def aafter_agent(self, state: dict, context) -> Optional[dict]:
         return None
 
-    # ── wrap hooks (can short-circuit, modify request/response) ──
-    async def awrap_model_call(self, request: dict, handler) -> Any:
-        return await handler(request)
+    async def awrap_model_call(self, state: dict, context, handler) -> Any:
+        return await handler(state)
 
-    async def awrap_tool_call(self, request: dict, handler) -> Any:
-        return await handler(request)
+    async def awrap_tool_call(self, state: dict, context, handler) -> Any:
+        return await handler(state)
 
 
 class MiddlewareStack:
-    """Composes multiple AgentMiddleware instances. Runs before hooks in order,
-    wrap hooks as onion (outer→inner), after hooks in reverse order."""
+    """Composes AgentMiddleware instances. before = order, after = reverse, wrap = onion."""
 
     def __init__(self, middlewares: list[AgentMiddleware]):
         self._mws = middlewares
 
-    # ── Run all before_X hooks in order, accumulating state changes ──
-    async def run_before_agent(self, state: dict, runtime: dict) -> dict:
+    async def run_abefore_model(self, state: dict, context) -> dict:
         for mw in self._mws:
-            delta = await mw.abefore_agent(state, runtime)
-            if delta:
-                state = {**state, **delta}
+            delta = await mw.abefore_model(state, context)
+            if delta: state = {**state, **delta}
         return state
 
-    async def run_before_model(self, state: dict, runtime: dict) -> dict:
+    async def run_aafter_model(self, state: dict, context) -> dict:
+        for mw in reversed(self._mws):
+            delta = await mw.aafter_model(state, context)
+            if delta: state = {**state, **delta}
+        return state
+
+    async def run_abefore_agent(self, state: dict, context) -> dict:
         for mw in self._mws:
-            delta = await mw.abefore_model(state, runtime)
-            if delta:
-                state = {**state, **delta}
+            delta = await mw.abefore_agent(state, context)
+            if delta: state = {**state, **delta}
         return state
 
-    async def run_after_model(self, state: dict, runtime: dict) -> dict:
+    async def run_aafter_agent(self, state: dict, context) -> dict:
         for mw in reversed(self._mws):
-            delta = await mw.aafter_model(state, runtime)
-            if delta:
-                state = {**state, **delta}
+            delta = await mw.aafter_agent(state, context)
+            if delta: state = {**state, **delta}
         return state
 
-    async def run_after_agent(self, state: dict, runtime: dict) -> dict:
-        for mw in reversed(self._mws):
-            delta = await mw.aafter_agent(state, runtime)
-            if delta:
-                state = {**state, **delta}
-        return state
-
-    # ── Wrap hooks: onion nesting (outermost middleware first) ──
-    async def run_wrap_model_call(self, request: dict, handler) -> Any:
-        wrapped = handler
-        for mw in reversed(self._mws):
-            prev = wrapped
-            # Use explicit closure to avoid late-binding lambda bug
-            def _make_wrapper(_mw, _prev):
-                async def _w(r):
-                    return await _mw.awrap_model_call(r, _prev)
-                return _w
-            wrapped = _make_wrapper(mw, prev)
-        return await wrapped(request)
-
-    async def run_wrap_tool_call(self, request: dict, handler) -> Any:
+    async def run_awrap_tool_call(self, state: dict, context, handler) -> Any:
         wrapped = handler
         for mw in reversed(self._mws):
             prev = wrapped
             def _make_wrapper(_mw, _prev):
-                async def _w(r):
-                    return await _mw.awrap_tool_call(r, _prev)
+                async def _w(s):
+                    return await _mw.awrap_tool_call(s, context, _prev)
                 return _w
             wrapped = _make_wrapper(mw, prev)
-        return await wrapped(request)
+        return await wrapped(state)
+
+    async def run_awrap_model_call(self, state: dict, context, handler) -> Any:
+        wrapped = handler
+        for mw in reversed(self._mws):
+            prev = wrapped
+            def _make_wrapper(_mw, _prev):
+                async def _w(s):
+                    return await _mw.awrap_model_call(s, context, _prev)
+                return _w
+            wrapped = _make_wrapper(mw, prev)
+        return await wrapped(state)

@@ -6,7 +6,7 @@ class AutoCompactMiddleware(AgentMiddleware):
     """Checks token count before model call; triggers compact if exceeding threshold."""
 
     async def abefore_model(self, state: dict, runtime: dict) -> dict | None:
-        compact_mgr = runtime.get("compact_manager")
+        compact_mgr = context.compact_manager
         if not compact_mgr:
             return None
 
