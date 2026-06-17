@@ -1,15 +1,19 @@
 """Write tool."""
 import os, json
-from pydantic import BaseModel, Field
+from pydantic import Field
 from langchain_core.tools import tool
 
-class FileWriteInput(BaseModel):
-    file_path: str = Field(description="Absolute path to write to (must be absolute)")
-    content: str = Field(description="Content to write")
+@tool
+async def write(
+    file_path: str = Field(description="Absolute path to write to (must be absolute)"),
+    content: str = Field(description="Content to write to the file"),
+) -> str:
+    """Write a file to disk, overwriting if exists. Creates parent directories as needed.
 
-@tool(args_schema=FileWriteInput)
-async def write(file_path: str, content: str) -> str:
-    """Write a file to disk, overwriting if exists. Creates parent directories as needed."""
+    Args:
+        file_path: Absolute path to write to
+        content: Content to write
+    """
     fp = file_path
     if not os.path.isabs(fp): fp = os.path.join(os.getcwd(), fp)
     try:

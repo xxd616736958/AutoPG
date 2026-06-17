@@ -1,14 +1,14 @@
 """Agent tool."""
 import json
-from pydantic import BaseModel, Field
+from pydantic import Field
 from langchain_core.tools import tool
 
-class AgentInput(BaseModel):
-    description: str = Field(description="Short (3-5 word) description of the task")
-    prompt: str = Field(description="The task for the agent to perform")
-    subagent_type: str = Field(default=None, description="Type of specialized agent")
-    run_in_background: bool = Field(default=False)
-@tool(args_schema=AgentInput)
-async def agent(description: str, prompt: str, subagent_type: str = None, run_in_background: bool = False) -> str:
-    """Launch a subagent for complex multi-step tasks."""
+@tool
+async def agent(
+    description: str = Field(description="A short (3-5 word) description of the task"),
+    prompt: str = Field(description="The task for the agent to perform"),
+    subagent_type: str = Field(default=None, description="Type of specialized agent to use (Explore, Plan, general-purpose)"),
+    run_in_background: bool = Field(default=False, description="Run agent asynchronously; you will be notified when it completes"),
+) -> str:
+    """Launch a subagent to handle complex multi-step tasks."""
     return json.dumps({"status":"launched","description":description,"subagent_type":subagent_type or "general-purpose","background":run_in_background})

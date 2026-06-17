@@ -1,17 +1,25 @@
 """Notebook tool."""
 import os, json
-from pydantic import BaseModel, Field
+from pydantic import Field
 from langchain_core.tools import tool
 
-class NBInput(BaseModel):
-    notebook_path: str = Field(description="Absolute path to the Jupyter notebook")
-    new_source: str = Field(description="New source for the cell")
-    cell_id: str = Field(default=None)
-    cell_type: str = Field(default="code", description="code or markdown")
-    edit_mode: str = Field(default="replace", description="replace, insert, or delete")
-@tool(args_schema=NBInput)
-async def notebook_edit(notebook_path: str, new_source: str, cell_id: str = None, cell_type: str = "code", edit_mode: str = "replace") -> str:
-    """Edit cells in a Jupyter notebook (.ipynb file)."""
+@tool
+async def notebook_edit(
+    notebook_path: str = Field(description="Absolute path to the Jupyter notebook file to edit"),
+    new_source: str = Field(description="The new source for the cell"),
+    cell_id: str = Field(default=None, description="The ID of the cell to edit (required for replace/delete)"),
+    cell_type: str = Field(default="code", description="Cell type: code or markdown"),
+    edit_mode: str = Field(default="replace", description="Edit mode: replace, insert, or delete"),
+) -> str:
+    """Edit cells in a Jupyter notebook (.ipynb file).
+
+    Args:
+        notebook_path: Absolute path to the notebook
+        new_source: New source for the cell
+        cell_id: Cell ID (required for replace/delete)
+        cell_type: code or markdown
+        edit_mode: replace, insert, or delete
+    """
     fp = notebook_path
     if not os.path.isabs(fp): fp = os.path.join(os.getcwd(), fp)
     try:

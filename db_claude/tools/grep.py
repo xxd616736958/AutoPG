@@ -1,18 +1,25 @@
 """Grep tool."""
 import os, re, subprocess, json
-from pydantic import BaseModel, Field
+from pydantic import Field
 from langchain_core.tools import tool
 
-class GrepInput(BaseModel):
-    pattern: str = Field(description="Regular expression pattern to search for")
-    path: str = Field(default=".", description="Directory or file to search in")
-    include: str = Field(default="", description="File pattern to include (e.g., '*.py')")
-    ignore_case: bool = Field(default=False)
-    max_results: int = Field(default=100, ge=1, le=500)
+@tool
+async def grep(
+    pattern: str = Field(description="Regular expression pattern to search for"),
+    path: str = Field(default=".", description="Directory or file to search in"),
+    include: str = Field(default="", description="File pattern to include (e.g., '*.py')"),
+    ignore_case: bool = Field(default=False, description="Case-insensitive search"),
+    max_results: int = Field(default=100, ge=1, le=500, description="Maximum number of results to return"),
+) -> str:
+    """Search file contents using regular expressions. Prefer over Bash 'grep'.
 
-@tool(args_schema=GrepInput)
-async def grep(pattern: str, path: str = ".", include: str = "", ignore_case: bool = False, max_results: int = 100) -> str:
-    """Search file contents using regex. Prefer over Bash 'grep'."""
+    Args:
+        pattern: Regular expression pattern
+        path: Directory or file to search in
+        include: File pattern to include
+        ignore_case: Case-insensitive search
+        max_results: Maximum number of results
+    """
     sp = os.path.expanduser(path)
     if not os.path.isabs(sp): sp = os.path.join(os.getcwd(), sp)
     try:

@@ -1,12 +1,13 @@
 """Web tools."""
-import json, httpx
-from pydantic import BaseModel, Field
+import json, re
+import httpx
+from pydantic import Field
 from langchain_core.tools import tool
 
-class WebSearchInput(BaseModel):
-    query: str = Field(min_length=2, description="The search query")
-@tool(args_schema=WebSearchInput)
-async def web_search(query: str) -> str:
+@tool
+async def web_search(
+    query: str = Field(min_length=2, description="The search query"),
+) -> str:
     """Search the web. Returns result blocks with titles and URLs."""
     try:
         async with httpx.AsyncClient(timeout=15) as c:
@@ -27,12 +28,11 @@ async def web_search(query: str) -> str:
         return json.dumps({"query":query,"count":len(p.r),"results":p.r[:10]})
     except Exception as e: return json.dumps(f"Error during web search: {str(e)}")
 
-class WebFetchInput(BaseModel):
-    url: str = Field(description="The URL to fetch content from")
-@tool(args_schema=WebFetchInput)
-async def web_fetch(url: str) -> str:
+@tool
+async def web_fetch(
+    url: str = Field(description="The URL to fetch content from"),
+) -> str:
     """Fetch a URL and convert the page to text."""
-    import re
     if url.startswith("http://"): url = url.replace("http://","https://",1)
     try:
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
