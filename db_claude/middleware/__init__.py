@@ -1,4 +1,4 @@
-"""Middleware for db-claude — aligning LangChain AgentMiddleware API on raw StateGraph."""
+"""Middleware for db-claude."""
 from .base import AgentMiddleware, MiddlewareStack
 from .collapse import ContextCollapseMiddleware
 from .compact import AutoCompactMiddleware
@@ -8,6 +8,7 @@ from .file_cache import FileCacheMiddleware
 from .session import SessionPersistenceMiddleware
 from .context import ProjectContextMiddleware
 from .tracking import TokenTrackingMiddleware
+from .user_hooks import UserHookMiddleware
 
 __all__ = [
     "AgentMiddleware", "MiddlewareStack",
@@ -15,4 +16,5 @@ __all__ = [
     "PermissionCheckMiddleware", "ToolResultBudgetMiddleware",
     "FileCacheMiddleware", "SessionPersistenceMiddleware",
     "ProjectContextMiddleware", "TokenTrackingMiddleware",
+    "UserHookMiddleware",
 ]

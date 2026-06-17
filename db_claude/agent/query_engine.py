@@ -22,10 +22,13 @@ def _default_middleware_stack() -> MiddlewareStack:
         ContextCollapseMiddleware, AutoCompactMiddleware,
         PermissionCheckMiddleware, FileCacheMiddleware,
         ToolResultBudgetMiddleware, TokenTrackingMiddleware,
-        ProjectContextMiddleware,
+        ProjectContextMiddleware, UserHookMiddleware,
     )
-    return MiddlewareStack([
+    from ..utils.hooks import load_hooks_config
+    hooks = load_hooks_config()
+    stack = MiddlewareStack([
         ProjectContextMiddleware(),
+        UserHookMiddleware(hooks),
         ContextCollapseMiddleware(),
         AutoCompactMiddleware(),
         PermissionCheckMiddleware(),
@@ -34,6 +37,9 @@ def _default_middleware_stack() -> MiddlewareStack:
         TokenTrackingMiddleware(),
         SessionPersistenceMiddleware(),
     ])
+    # Attach hooks config for graph.py ToolNode access
+    stack._hooks_config = hooks
+    return stack
 
 
 class QueryEngine:

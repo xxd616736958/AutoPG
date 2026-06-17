@@ -7,6 +7,10 @@ import platform
 from datetime import datetime
 from typing import Optional
 from ..utils.file_cache import memoized
+from .prompt_sections import (
+    get_doing_tasks_section, get_actions_section, get_using_tools_section,
+    get_tone_section, get_git_safety_section, get_output_efficiency_section,
+)
 
 
 CYBER_RISK_INSTRUCTION = (
@@ -255,6 +259,18 @@ async def build_system_prompt(
             get_environment_section(cwd, additional_working_directories or []),
             "",
             *([f"# Project Instructions (CLAUDE.md)\n\n{claude_md_content}", ""] if claude_md_content else []),
+            get_doing_tasks_section(),
+            "",
+            get_actions_section(),
+            "",
+            get_tone_section(),
+            "",
+            get_output_efficiency_section(),
+            "",
+            get_using_tools_section(),
+            "",
+            get_git_safety_section(),
+            "",
             get_tool_usage_section(),
             "",
             get_context_management_section(),

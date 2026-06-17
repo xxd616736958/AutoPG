@@ -42,8 +42,28 @@ def build_agent_graph(
 ):
     """Build agent StateGraph with ToolNode + tools_condition."""
     llm = _build_llm(provider, model, api_key, base_url)
-    # Convert native tools to LangChain StructuredTools
     llm_with_tools = llm.bind_tools(tools)
+
+    # ── User hooks: PreToolUse / PostToolUse via ToolNode awrap_tool_call ──
+    hooks_config = getattr(middleware_stack, '_hooks_config', {}) if middleware_stack else {}
+
+    async def _tool_hook_wrapper(request, execute):
+        try:
+            tool_name = request.tool_call.get("name", "")
+        except Exception:
+            return await execute(request)
+        tool_args = request.tool_call.get("args", {})
+        if hooks_config.get("PreToolUse"):
+            from ..utils.hooks import execute_matching_hooks
+            block = await execute_matching_hooks("PreToolUse", tool_name, tool_args, hooks_config)
+            if block:
+                from langchain_core.messages import ToolMessage
+                return ToolMessage(content=f"Hook blocked: {block}", tool_call_id=request.tool_call.get("id",""), name=tool_name)
+        result = await execute(request)
+        if hooks_config.get("PostToolUse"):
+            from ..utils.hooks import execute_matching_hooks
+            await execute_matching_hooks("PostToolUse", tool_name, tool_args, hooks_config)
+        return result
 
     workflow = StateGraph(AgentState)
 
@@ -100,7 +120,8 @@ def build_agent_graph(
     # ToolNode — LangGraph built-in tool execution
     # ═══════════════════════════════════════════════════
 
-    tool_node = ToolNode(tools, handle_tool_errors=True)
+    tool_node = ToolNode(tools, handle_tool_errors=True,
+                        awrap_tool_call=_tool_hook_wrapper if hooks_config else None)
 
     workflow.add_node("agent", call_model)
     workflow.add_node("tools", tool_node)
