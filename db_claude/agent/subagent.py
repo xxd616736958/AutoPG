@@ -58,9 +58,9 @@ def create_subagent_context(
     - Callbacks: muted (no stream/callback pollution to parent)
     - Abort: child controller linked to parent
     """
-    from ..tools import create_default_tools
+    from ..tools import ALL_TOOLS
 
-    all_tools = list(parent_engine.tools) if parent_engine.tools else create_default_tools().list_enabled()
+    all_tools = list(parent_engine.tools) if parent_engine.tools else ALL_TOOLS
 
     # Filter tools per agent definition
     if agent_def.tools == ["*"]:

@@ -43,8 +43,7 @@ def build_agent_graph(
     """Build agent StateGraph with ToolNode + tools_condition."""
     llm = _build_llm(provider, model, api_key, base_url)
     # Convert native tools to LangChain StructuredTools
-    lc_tools = [t.to_langchain_tool() for t in tools if getattr(t, 'is_enabled', lambda: True)()]
-    llm_with_tools = llm.bind_tools(lc_tools)
+    llm_with_tools = llm.bind_tools(tools)
 
     workflow = StateGraph(AgentState)
 
@@ -101,7 +100,7 @@ def build_agent_graph(
     # ToolNode — LangGraph built-in tool execution
     # ═══════════════════════════════════════════════════
 
-    tool_node = ToolNode(lc_tools, handle_tool_errors=True)
+    tool_node = ToolNode(tools, handle_tool_errors=True)
 
     workflow.add_node("agent", call_model)
     workflow.add_node("tools", tool_node)

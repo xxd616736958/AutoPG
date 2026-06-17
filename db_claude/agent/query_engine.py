@@ -13,6 +13,7 @@ from ..context.collapse import ContextCollapseManager
 from ..middleware import MiddlewareStack, SessionPersistenceMiddleware
 from ..utils.file_cache import FileStateCache
 from ..utils.session import enqueue_write, _serialize
+from ..tools.display import format_call, format_result
 from .system_prompt import build_system_prompt
 
 
@@ -156,25 +157,17 @@ class QueryEngine:
                         yield {"type": "token", "content": token}
 
                 elif kind == "on_tool_start":
-                    # ToolNode emits this natively
                     name = event.get("name", "")
                     inp = event.get("data", {}).get("input", {})
-                    native = self._find_tool(name)
-                    call_display = native.format_call(inp) if native else name
-                    yield {"type": "tool_start", "name": name, "call_display": call_display}
+                    yield {"type": "tool_start", "name": name,
+                           "call_display": format_call(name, inp)}
 
                 elif kind == "on_tool_end":
-                    # ToolNode emits this natively
                     name = event.get("name", "")
                     output = event.get("data", {}).get("output")
                     result_str = str(getattr(output, "content", "done"))
-                    native = self._find_tool(name)
-                    try:
-                        import json
-                        fmt = json.loads(result_str) if result_str.startswith("{") else result_str
-                    except Exception: fmt = result_str
-                    formatted = native.format_result(fmt) if native else result_str[:200]
-                    yield {"type": "tool_end", "name": name, "result_preview": formatted}
+                    yield {"type": "tool_end", "name": name,
+                           "result_preview": format_result(name, result_str)}
 
                 elif kind == "on_chain_end" and event.get("name") == "tools":
                     turn_count += 1

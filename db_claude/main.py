@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from db_claude.utils.config import get_global_config, load_config, save_config
 from db_claude.utils.session import resume_messages, list_sessions, load_session, get_last_session_id
-from db_claude.tools import create_default_tools
+from db_claude.tools import ALL_TOOLS
 from db_claude.agent.query_engine import QueryEngine
 from db_claude.cli.commands import SlashCommandHandler
 from db_claude.cli.repl import ReplInterface
@@ -161,8 +161,7 @@ def _format_tool_result(name: str, data: str) -> str:
 
 def _build_engine(args, config, non_interactive: bool = False, resume_sid: str = None) -> QueryEngine:
     """Build a QueryEngine from args + config."""
-    tools = create_default_tools()
-    tools_list = tools.list_enabled()
+    tools_list = ALL_TOOLS
 
     provider = args.provider or config.provider
     model = args.model or config.model

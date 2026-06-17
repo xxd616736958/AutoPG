@@ -191,9 +191,7 @@ def get_tool_list_section(tools: list) -> str:
     """Build the tool listing section matching Claude Code's format."""
     lines = ["# Tools", "", "You have access to the following tools:"]
     for tool in tools:
-        if not tool.is_enabled():
-            continue
-        schema = tool.get_input_schema_dict()
+        schema = tool.args_schema.model_json_schema() if getattr(tool, 'args_schema', None) else {}
         props = schema.get("properties", {})
         required = schema.get("required", [])
 
@@ -208,10 +206,6 @@ def get_tool_list_section(tools: list) -> str:
         param_block = "\n".join(param_strs) if param_strs else "  (no parameters)"
 
         lines.append(f"\n### {tool.name}")
-        if tool.aliases:
-            lines.append(f"Aliases: {', '.join(tool.aliases)}")
-        if tool.search_hint:
-            lines.append(f"*{tool.search_hint}*")
         lines.append(f"\nParameters:\n{param_block}")
 
     return "\n".join(lines)

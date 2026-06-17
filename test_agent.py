@@ -10,7 +10,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from db_claude.tools import create_default_tools
+from db_claude.tools import ALL_TOOLS
 from db_claude.agent.query_engine import QueryEngine
 
 # DeepSeek config
@@ -66,9 +66,10 @@ async def consume_result(engine: QueryEngine, prompt: str) -> dict:
 
 def create_engine(max_turns: int = 5) -> QueryEngine:
     """Create a QueryEngine configured for DeepSeek."""
-    tools = create_default_tools()
+    if not DEEPSEEK_API_KEY:
+        raise RuntimeError("Set DEEPSEEK_API_KEY to run end-to-end tests")
     return QueryEngine(
-        tools=tools.list_enabled(),
+        tools=ALL_TOOLS,
         model_name=DEEPSEEK_MODEL,
         cwd=os.path.dirname(os.path.abspath(__file__)),
         max_turns=max_turns,
