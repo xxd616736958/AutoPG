@@ -1,6 +1,5 @@
 """
-QueryEngine — thin shell over compiled graph + middleware stack.
-Runs graph via astream_events, converts events for CLI/REPL.
+QueryEngine — thin shell over compiled graph. ToolNode handles events.
 """
 import os, uuid, time, asyncio
 from typing import Optional, Callable
@@ -11,19 +10,19 @@ from ..graph import build_agent_graph
 from ..context_schema import AgentContext
 from ..context.compact import CompactManager
 from ..context.collapse import ContextCollapseManager
-from ..middleware import (
-    MiddlewareStack,
-    ContextCollapseMiddleware, AutoCompactMiddleware,
-    PermissionCheckMiddleware, FileCacheMiddleware,
-    ToolResultBudgetMiddleware, SessionPersistenceMiddleware,
-    ProjectContextMiddleware, TokenTrackingMiddleware,
-)
+from ..middleware import MiddlewareStack, SessionPersistenceMiddleware
 from ..utils.file_cache import FileStateCache
 from ..utils.session import enqueue_write, _serialize
 from .system_prompt import build_system_prompt
 
 
 def _default_middleware_stack() -> MiddlewareStack:
+    from ..middleware import (
+        ContextCollapseMiddleware, AutoCompactMiddleware,
+        PermissionCheckMiddleware, FileCacheMiddleware,
+        ToolResultBudgetMiddleware, TokenTrackingMiddleware,
+        ProjectContextMiddleware,
+    )
     return MiddlewareStack([
         ProjectContextMiddleware(),
         ContextCollapseMiddleware(),
@@ -41,27 +40,18 @@ class QueryEngine:
 
     def __init__(
         self, tools: list, model_name: str = "deepseek-v4-flash",
-        fallback_model: str = None, cwd: str = "",
-        max_turns: int = None,
-        max_budget_usd: float = None,
-        permission_mode: str = "default",
-        custom_system_prompt: str = None,
-        append_system_prompt: str = None,
+        fallback_model: str = None, cwd: str = "", max_turns: int = None,
+        max_budget_usd: float = None, permission_mode: str = "default",
+        custom_system_prompt: str = None, append_system_prompt: str = None,
         is_non_interactive_session: bool = False,
         initial_messages: list = None,
-        provider: str = "deepseek",
-        api_key: str = None, base_url: str = None,
-        on_stream_token: Callable = None,
-        on_tool_start: Callable = None,
-        on_tool_end: Callable = None,
-        on_permission_check: Callable = None,
+        provider: str = "deepseek", api_key: str = None, base_url: str = None,
+        on_stream_token: Callable = None, on_tool_start: Callable = None,
+        on_tool_end: Callable = None, on_permission_check: Callable = None,
     ):
-        self.tools = tools
-        self.model_name = model_name
-        self.cwd = cwd
-        self.provider = provider
-        self.api_key = api_key
-        self.base_url = base_url
+        self.tools = tools; self.model_name = model_name
+        self.cwd = cwd; self.provider = provider
+        self.api_key = api_key; self.base_url = base_url
         self.max_turns = max_turns or 100
         self.permission_mode = permission_mode
         self.custom_system_prompt = custom_system_prompt
@@ -75,18 +65,15 @@ class QueryEngine:
         self._session_id = str(uuid.uuid4())
         self.mutable_messages: list = initial_messages or []
         self.total_usage = {"input_tokens": 0, "output_tokens": 0}
-        self._abort = False
-        self._auto_save = True
+        self._abort = False; self._auto_save = True
         self._child_engines: list = []
 
-        # Infrastructure
-        self._file_cache = FileStateCache(100, 25 * 1024 * 1024)
+        self._file_cache = FileStateCache(100, 25*1024*1024)
         self._compact = CompactManager(model_name, provider, api_key, base_url)
         self._collapse = ContextCollapseManager(self._session_id, provider, api_key, base_url)
         self._result_temp_dir = os.path.join(os.path.expanduser("~/.db-claude"), "tool_results")
         self._stack = _default_middleware_stack()
-        self._graph = None
-        self._sys_prompt_cache = ""
+        self._graph = None; self._sys_prompt_cache = ""
 
     def interrupt(self):
         self._abort = True
@@ -111,8 +98,7 @@ class QueryEngine:
                 tools=self.tools, model=self.model_name,
                 middleware_stack=self._stack,
                 provider=self.provider, api_key=self.api_key, base_url=self.base_url,
-                system_prompt=self._sys_prompt_cache,
-                max_turns=self.max_turns,
+                system_prompt=self._sys_prompt_cache, max_turns=self.max_turns,
             )
         return self._graph
 
@@ -136,16 +122,12 @@ class QueryEngine:
         context = AgentContext(
             session_id=self._session_id, cwd=self.cwd,
             provider=self.provider, model=self.model_name,
-            permission_mode=self.permission_mode,
-            auto_save=self._auto_save,
+            permission_mode=self.permission_mode, auto_save=self._auto_save,
             is_non_interactive=self.is_non_interactive,
             max_turns=self.max_turns,
-            collapse_manager=self._collapse,
-            compact_manager=self._compact,
-            file_cache=self._file_cache,
-            total_usage=self.total_usage,
-            result_temp_dir=self._result_temp_dir,
-            _parent_engine=self,
+            collapse_manager=self._collapse, compact_manager=self._compact,
+            file_cache=self._file_cache, total_usage=self.total_usage,
+            result_temp_dir=self._result_temp_dir, _parent_engine=self,
             on_stream_token=self.on_stream_token,
             on_tool_start=self.on_tool_start,
             on_tool_end=self.on_tool_end,
@@ -154,57 +136,49 @@ class QueryEngine:
 
         graph = self._get_graph()
         config = {"configurable": {"thread_id": self._session_id, "_context": context}}
-        initial_messages = list(self.mutable_messages)
 
         try:
-            accumulated_text = ""
-            turn_count = 0
-            tool_event_queue: asyncio.Queue = asyncio.Queue()
-
-            # Wire tool callbacks to push to queue
-            orig_tool_start = context.on_tool_start
-            orig_tool_end = context.on_tool_end
-            def _push_ts(name, display):
-                tool_event_queue.put_nowait({"type": "tool_start", "name": name, "call_display": display})
-                if orig_tool_start: orig_tool_start(name, display)
-            def _push_te(name, result):
-                tool_event_queue.put_nowait({"type": "tool_end", "name": name, "result_preview": result})
-                if orig_tool_end: orig_tool_end(name, result)
-            context.on_tool_start = _push_ts
-            context.on_tool_end = _push_te
+            accumulated_text = ""; turn_count = 0
 
             async for event in graph.astream_events(
-                {"messages": initial_messages,
+                {"messages": list(self.mutable_messages),
                  "system_prompt": self._sys_prompt_cache},
-                config=config, context=context, version="v2",
+                config=config, version="v2",
             ):
                 if self._abort: break
                 kind = event.get("event", "")
 
                 if kind == "on_chat_model_stream":
-                    # Drain pending tool events first
-                    while not tool_event_queue.empty():
-                        try:
-                            yield tool_event_queue.get_nowait()
-                        except asyncio.QueueEmpty:
-                            break
                     chunk = event.get("data", {}).get("chunk")
                     if chunk and hasattr(chunk, "content") and chunk.content:
                         token = str(chunk.content)
                         accumulated_text += token
                         yield {"type": "token", "content": token}
 
+                elif kind == "on_tool_start":
+                    # ToolNode emits this natively
+                    name = event.get("name", "")
+                    inp = event.get("data", {}).get("input", {})
+                    native = self._find_tool(name)
+                    call_display = native.format_call(inp) if native else name
+                    yield {"type": "tool_start", "name": name, "call_display": call_display}
+
+                elif kind == "on_tool_end":
+                    # ToolNode emits this natively
+                    name = event.get("name", "")
+                    output = event.get("data", {}).get("output")
+                    result_str = str(getattr(output, "content", "done"))
+                    native = self._find_tool(name)
+                    try:
+                        import json
+                        fmt = json.loads(result_str) if result_str.startswith("{") else result_str
+                    except Exception: fmt = result_str
+                    formatted = native.format_result(fmt) if native else result_str[:200]
+                    yield {"type": "tool_end", "name": name, "result_preview": formatted}
+
                 elif kind == "on_chain_end" and event.get("name") == "tools":
                     turn_count += 1
 
-            # Drain remaining tool events
-            while not tool_event_queue.empty():
-                try:
-                    yield tool_event_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-
-            # Extract final state
             final = graph.get_state(config)
             if final and hasattr(final, "values"):
                 self.mutable_messages = list(final.values.get("messages", []))
@@ -214,21 +188,21 @@ class QueryEngine:
             if not text_result:
                 for msg in reversed(self.mutable_messages):
                     if isinstance(msg, AIMessage) and msg.content:
-                        text_result = str(msg.content)
-                        break
+                        text_result = str(msg.content); break
 
             duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
-            yield {
-                "type": "result", "subtype": "success", "is_error": False,
-                "duration_ms": duration_ms, "num_turns": turn_count,
-                "result": text_result,
-                "session_id": self._session_id, "usage": self.total_usage,
-            }
+            yield {"type": "result", "subtype": "success", "is_error": False,
+                   "duration_ms": duration_ms, "num_turns": turn_count,
+                   "result": text_result, "session_id": self._session_id,
+                   "usage": self.total_usage}
         except Exception as e:
             duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
-            yield {
-                "type": "result", "subtype": "error_during_execution", "is_error": True,
-                "duration_ms": duration_ms, "result": "",
-                "session_id": self._session_id, "usage": self.total_usage,
-                "errors": [str(e)],
-            }
+            yield {"type": "result", "subtype": "error_during_execution", "is_error": True,
+                   "duration_ms": duration_ms, "result": "",
+                   "session_id": self._session_id, "usage": self.total_usage,
+                   "errors": [str(e)]}
+
+    def _find_tool(self, name: str):
+        for t in self.tools:
+            if t.name == name or name in (t.aliases or []): return t
+        return None
