@@ -11,15 +11,7 @@ async def grep(
     ignore_case: bool = Field(default=False, description="Case-insensitive search"),
     max_results: int = Field(default=100, ge=1, le=500, description="Maximum number of results to return"),
 ) -> str:
-    """Search file contents using regular expressions. Prefer over Bash 'grep'.
-
-    Args:
-        pattern: Regular expression pattern
-        path: Directory or file to search in
-        include: File pattern to include
-        ignore_case: Case-insensitive search
-        max_results: Maximum number of results
-    """
+    """Search file contents using regular expressions. Prefer over Bash 'grep'."""
     sp = os.path.expanduser(path)
     if not os.path.isabs(sp): sp = os.path.join(os.getcwd(), sp)
     try:

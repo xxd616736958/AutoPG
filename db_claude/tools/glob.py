@@ -8,12 +8,7 @@ async def glob(
     pattern: str = Field(description="Glob pattern to match files against (e.g., '*.py', 'test_*.ts')"),
     path: str = Field(default=".", description="Directory to search in"),
 ) -> str:
-    """Find files matching a glob pattern. Prefer over Bash 'find' or 'ls'.
-
-    Args:
-        pattern: Glob pattern to match
-        path: Directory to search in
-    """
+    """Find files matching a glob pattern. Prefer over Bash 'find' or 'ls'."""
     sp = os.path.expanduser(path)
     if not os.path.isabs(sp): sp = os.path.join(os.getcwd(), sp)
     try:

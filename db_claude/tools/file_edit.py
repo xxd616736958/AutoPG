@@ -10,14 +10,7 @@ async def edit(
     new_string: str = Field(description="Replacement text (must differ from old_string)"),
     replace_all: bool = Field(default=False, description="Replace all occurrences instead of just the first"),
 ) -> str:
-    """Perform exact string replacement in a file.
-
-    Args:
-        file_path: Absolute path to the file to modify
-        old_string: Exact text to replace
-        new_string: Replacement text
-        replace_all: Replace all occurrences
-    """
+    """Perform exact string replacement in a file."""
     fp = file_path
     if not os.path.isabs(fp): fp = os.path.join(os.getcwd(), fp)
     if old_string == new_string: return json.dumps("Error: old_string and new_string must differ")

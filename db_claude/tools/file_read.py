@@ -9,13 +9,7 @@ async def read(
     offset: int = Field(default=0, ge=0, description="Line number to start reading from (1-based)"),
     limit: int = Field(default=None, description="Maximum number of lines to read"),
 ) -> str:
-    """Read file contents from the local filesystem. Returns text with line numbers.
-
-    Args:
-        file_path: Absolute path to the file to read
-        offset: Line number to start reading from (1-based)
-        limit: Maximum number of lines to read
-    """
+    """Read file contents from the local filesystem. Returns text with line numbers."""
     fp = os.path.expanduser(file_path)
     if not os.path.isabs(fp): fp = os.path.join(os.getcwd(), fp)
     try:

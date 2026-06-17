@@ -11,15 +11,7 @@ async def notebook_edit(
     cell_type: str = Field(default="code", description="Cell type: code or markdown"),
     edit_mode: str = Field(default="replace", description="Edit mode: replace, insert, or delete"),
 ) -> str:
-    """Edit cells in a Jupyter notebook (.ipynb file).
-
-    Args:
-        notebook_path: Absolute path to the notebook
-        new_source: New source for the cell
-        cell_id: Cell ID (required for replace/delete)
-        cell_type: code or markdown
-        edit_mode: replace, insert, or delete
-    """
+    """Edit cells in a Jupyter notebook (.ipynb file)."""
     fp = notebook_path
     if not os.path.isabs(fp): fp = os.path.join(os.getcwd(), fp)
     try:

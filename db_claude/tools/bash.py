@@ -10,14 +10,7 @@ async def bash(
     timeout: int = Field(default=120000, ge=1000, le=600000, description="Timeout in milliseconds (max 600000)"),
     run_in_background: bool = Field(default=False, description="Run command in background and notify on completion"),
 ) -> str:
-    """Execute a bash command in the user's shell environment.
-
-    Args:
-        command: The bash command to execute
-        description: Clear description of what this command does
-        timeout: Timeout in milliseconds (max 600000)
-        run_in_background: Run in background and notify on completion
-    """
+    """Execute a bash command in the user's shell environment."""
     timeout_sec = min(timeout, 600000) / 1000.0
     try:
         if run_in_background:
