@@ -26,7 +26,7 @@ def _default_middleware_stack() -> MiddlewareStack:
     )
     from ..utils.hooks import load_hooks_config
     hooks = load_hooks_config()
-    stack = MiddlewareStack([
+    return MiddlewareStack([
         ProjectContextMiddleware(),
         UserHookMiddleware(hooks),
         ContextCollapseMiddleware(),
@@ -36,10 +36,7 @@ def _default_middleware_stack() -> MiddlewareStack:
         ToolResultBudgetMiddleware(),
         TokenTrackingMiddleware(),
         SessionPersistenceMiddleware(),
-    ])
-    # Attach hooks config for graph.py ToolNode access
-    stack._hooks_config = hooks
-    return stack
+    ]), hooks
 
 
 class QueryEngine:
@@ -79,7 +76,7 @@ class QueryEngine:
         self._compact = CompactManager(model_name, provider, api_key, base_url)
         self._collapse = ContextCollapseManager(self._session_id, provider, api_key, base_url)
         self._result_temp_dir = os.path.join(os.path.expanduser("~/.db-claude"), "tool_results")
-        self._stack = _default_middleware_stack()
+        self._stack, self._hooks_config = _default_middleware_stack()
         self._graph = None; self._sys_prompt_cache = ""
 
     def interrupt(self):
@@ -106,6 +103,7 @@ class QueryEngine:
                 middleware_stack=self._stack,
                 provider=self.provider, api_key=self.api_key, base_url=self.base_url,
                 system_prompt=self._sys_prompt_cache, max_turns=self.max_turns,
+                hooks_config_param=self._hooks_config,
             )
         return self._graph
 
@@ -172,11 +170,13 @@ class QueryEngine:
                     name = event.get("name", "")
                     output = event.get("data", {}).get("output")
                     result_str = str(getattr(output, "content", "done"))
+                    # Split hook output from tool data (embedded by graph.py)
+                    hook_part = ""
+                    if "__HOOK__" in result_str:
+                        result_str, hook_part = result_str.split("__HOOK__", 1)
                     preview = format_result(name, result_str)
-                    # Include hook output if present (appended after JSON)
-                    if "PostToolUse hook" in result_str:
-                        hook_part = result_str.split("PostToolUse hook", 1)[-1].strip()
-                        if hook_part: preview = f"{preview}\n{hook_part}"
+                    if hook_part:
+                        preview = f"{preview}\n  ⎿  {hook_part[:300]}"
                     yield {"type": "tool_end", "name": name,
                            "result_preview": preview}
 

@@ -40,13 +40,15 @@ def build_agent_graph(
     system_prompt: str = "",
     max_turns: int = 100,
     checkpointer=None,
+    hooks_config_param: dict = None,
 ):
     """Build agent StateGraph with ToolNode + tools_condition."""
     llm = _build_llm(provider, model, api_key, base_url)
     llm_with_tools = llm.bind_tools(tools)
 
     # ── User hooks: PreToolUse / PostToolUse via ToolNode awrap_tool_call ──
-    hooks_config = getattr(middleware_stack, '_hooks_config', {}) if middleware_stack else {}
+    # Clean separation: ONLY execution control (block/allow). Display is handled by query_engine.
+    hooks_config = hooks_config_param if hooks_config_param else {}
 
     async def _tool_hook_wrapper(request, execute):
         try:
@@ -56,22 +58,17 @@ def build_agent_graph(
         tool_args = request.tool_call.get("args", {})
         if hooks_config.get("PreToolUse"):
             block = await execute_matching_hooks("PreToolUse", tool_name, tool_args, hooks_config)
-            if block:
+            if block and "Blocked" in str(block):
                 from langchain_core.messages import ToolMessage
                 return ToolMessage(content=f"Hook blocked: {block}", tool_call_id=request.tool_call.get("id",""), name=tool_name)
         result = await execute(request)
         if hooks_config.get("PostToolUse"):
             hook_msg = await execute_matching_hooks("PostToolUse", tool_name, tool_args, hooks_config)
             if hook_msg:
-                if hook_msg.startswith("Blocked"):
-                    from langchain_core.messages import ToolMessage
-                    return ToolMessage(content=f"Hook blocked: {hook_msg}", tool_call_id=request.tool_call.get("id",""), name=tool_name)
-                # Write hook output directly to terminal
-                import sys
-                for line in hook_msg.strip().split("\n")[:10]:
-                    sys.stdout.write(f"\n  ⎿  {line[:120]}")
-                sys.stdout.write("\n")
-                sys.stdout.flush()
+                # Embed hook output in content (ToolNode preserves content string)
+                try:
+                    result.content = str(result.content) + "__HOOK__" + hook_msg
+                except Exception: pass
         return result
 
     workflow = StateGraph(AgentState)
