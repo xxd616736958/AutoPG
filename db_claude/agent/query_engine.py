@@ -172,8 +172,13 @@ class QueryEngine:
                     name = event.get("name", "")
                     output = event.get("data", {}).get("output")
                     result_str = str(getattr(output, "content", "done"))
+                    preview = format_result(name, result_str)
+                    # Include hook output if present (appended after JSON)
+                    if "PostToolUse hook" in result_str:
+                        hook_part = result_str.split("PostToolUse hook", 1)[-1].strip()
+                        if hook_part: preview = f"{preview}\n{hook_part}"
                     yield {"type": "tool_end", "name": name,
-                           "result_preview": format_result(name, result_str)}
+                           "result_preview": preview}
 
                 elif kind == "on_chain_end" and event.get("name") == "tools":
                     turn_count += 1

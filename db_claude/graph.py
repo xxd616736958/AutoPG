@@ -11,6 +11,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from .agent.state import AgentState
 from .context_schema import AgentContext
+from .utils.hooks import execute_matching_hooks
 
 
 def _build_llm(provider: str, model: str, api_key: str = None, base_url: str = None):
@@ -54,15 +55,23 @@ def build_agent_graph(
             return await execute(request)
         tool_args = request.tool_call.get("args", {})
         if hooks_config.get("PreToolUse"):
-            from ..utils.hooks import execute_matching_hooks
             block = await execute_matching_hooks("PreToolUse", tool_name, tool_args, hooks_config)
             if block:
                 from langchain_core.messages import ToolMessage
                 return ToolMessage(content=f"Hook blocked: {block}", tool_call_id=request.tool_call.get("id",""), name=tool_name)
         result = await execute(request)
         if hooks_config.get("PostToolUse"):
-            from ..utils.hooks import execute_matching_hooks
-            await execute_matching_hooks("PostToolUse", tool_name, tool_args, hooks_config)
+            hook_msg = await execute_matching_hooks("PostToolUse", tool_name, tool_args, hooks_config)
+            if hook_msg:
+                if hook_msg.startswith("Blocked"):
+                    from langchain_core.messages import ToolMessage
+                    return ToolMessage(content=f"Hook blocked: {hook_msg}", tool_call_id=request.tool_call.get("id",""), name=tool_name)
+                # Write hook output directly to terminal
+                import sys
+                for line in hook_msg.strip().split("\n")[:10]:
+                    sys.stdout.write(f"\n  ⎿  {line[:120]}")
+                sys.stdout.write("\n")
+                sys.stdout.flush()
         return result
 
     workflow = StateGraph(AgentState)

@@ -31,7 +31,8 @@ def _match_matcher(matcher: Optional[str], tool_name: str, tool_args: dict) -> b
         if tool_name.lower() == "bash" and "command" in tool_args:
             return fnmatch.fnmatch(tool_args.get("command", ""), inner)
         if "file_path" in tool_args:
-            return fnmatch.fnmatch(tool_args.get("file_path", ""), inner)
+            fname = os.path.basename(tool_args.get("file_path", ""))
+            return fnmatch.fnmatch(fname, inner)
         return False
     return tool_name.lower() == matcher.lower()
 
@@ -77,7 +78,8 @@ def build_hook_env(tool_name: str, tool_args: dict) -> dict:
 async def execute_matching_hooks(
     event: str, tool_name: str, tool_args: dict, hooks_config: dict
 ) -> Optional[str]:
-    """Run matching hooks for an event. Returns blocking message if any hook blocks."""
+    """Run matching hooks. Returns combined stdout for display, or blocking message."""
+    all_output = []
     for hook in hooks_config.get(event, []):
         matcher = hook.get("matcher")
         if not _match_matcher(matcher, tool_name, tool_args):
@@ -86,4 +88,6 @@ async def execute_matching_hooks(
         result = await run_shell_hook(hook["command"], env)
         if result["exit_code"] == 2:
             return result["stderr"].strip() or f"Blocked by {event} hook"
-    return None
+        if result["stdout"].strip():
+            all_output.append(result["stdout"].strip())
+    return "\n".join(all_output) if all_output else None
