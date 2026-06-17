@@ -96,7 +96,11 @@ class QueryEngine:
         if os.path.exists(self._result_temp_dir):
             shutil.rmtree(self._result_temp_dir, ignore_errors=True)
 
-    def _get_graph(self):
+    def _get_graph(self, hooks_config: dict = None):
+        # Rebuild if hooks changed (user edited config.json between turns)
+        if hooks_config and hooks_config != getattr(self, '_last_hooks', None):
+            self._graph = None
+            self._last_hooks = dict(hooks_config)
         if self._graph is None:
             self._graph = build_agent_graph(
                 tools=self.tools, model=self.model_name,
@@ -139,7 +143,7 @@ class QueryEngine:
             on_permission_check=self.on_permission_check,
         )
 
-        graph = self._get_graph()
+        graph = self._get_graph(self._hooks_config)
         config = {"configurable": {"thread_id": self._session_id, "_context": context}}
 
         try:
