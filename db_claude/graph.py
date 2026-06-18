@@ -65,10 +65,14 @@ def build_agent_graph(
         if hooks_config.get("PostToolUse"):
             hook_msg = await execute_matching_hooks("PostToolUse", tool_name, tool_args, hooks_config)
             if hook_msg:
-                # Embed hook output in content (ToolNode preserves content string)
-                try:
-                    result.content = str(result.content) + "__HOOK__" + hook_msg
-                except Exception: pass
+                tc_id = request.tool_call.get("id", str(uuid.uuid4()))
+                _hook_outputs[tc_id] = hook_msg
+                # Also write to stdout for immediate visibility
+                import sys
+                for line in hook_msg.strip().split("\n")[:5]:
+                    sys.stdout.write(f"\n  ⎿  {line[:120]}")
+                sys.stdout.write("\n")
+                sys.stdout.flush()
         return result
 
     workflow = StateGraph(AgentState)
@@ -139,3 +143,16 @@ def build_agent_graph(
 
 
 compiled_graph = None  # Built lazily
+
+# Side channel: hook output indexed by tool_call_id (ToolNode rebuilds ToolMessage, discarding custom attrs)
+_hook_outputs: dict[str, str] = {}
+
+def pop_hook_output(tool_call_id: str) -> str:
+    """Retrieve and clear hook output for a tool call. Called by query_engine."""
+    return _hook_outputs.pop(tool_call_id, "")
+
+def drain_hook_outputs() -> str:
+    """Drain all pending hook outputs. Returns concatenated string."""
+    result = "\n".join(v for v in _hook_outputs.values() if v)
+    _hook_outputs.clear()
+    return result

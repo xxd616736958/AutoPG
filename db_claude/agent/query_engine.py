@@ -1,10 +1,12 @@
 """
 QueryEngine — thin shell over compiled graph. ToolNode handles events.
 """
-import os, uuid, time, asyncio
+import os, uuid, time, asyncio, logging
 from typing import Optional, Callable
 from datetime import datetime
 from langchain_core.messages import HumanMessage, AIMessage
+
+logger = logging.getLogger(__name__)
 
 from ..graph import build_agent_graph
 from ..context_schema import AgentContext
@@ -123,6 +125,7 @@ class QueryEngine:
     async def submit_message(self, prompt: str, options: dict = None):
         start_time = datetime.now()
         await self._ensure_sys_prompt()
+        logger.info("submit_start session=%s prompt_len=%d", self._session_id[:8], len(prompt))
 
         user_msg = HumanMessage(content=prompt)
         self.mutable_messages.append(user_msg)
@@ -174,13 +177,15 @@ class QueryEngine:
                     name = event.get("name", "")
                     output = event.get("data", {}).get("output")
                     result_str = str(getattr(output, "content", "done"))
-                    # Split hook output from tool data (embedded by graph.py)
-                    hook_part = ""
-                    if "__HOOK__" in result_str:
-                        result_str, hook_part = result_str.split("__HOOK__", 1)
                     preview = format_result(name, result_str)
+                    # Read hook output from side channel
+                    hook_part = ""
+                    try:
+                        from ..graph import drain_hook_outputs
+                        hook_part = drain_hook_outputs()
+                    except Exception: pass
                     if hook_part:
-                        preview = f"{preview}\n  ⎿  {hook_part[:300]}"
+                        preview = f"{preview}\n{hook_part}"
                     yield {"type": "tool_end", "name": name,
                            "result_preview": preview}
 
@@ -199,12 +204,16 @@ class QueryEngine:
                         text_result = str(msg.content); break
 
             duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+            logger.info("submit_done session=%s turns=%d duration=%dms tokens_in=%d tokens_out=%d",
+                        self._session_id[:8], turn_count, duration_ms,
+                        self.total_usage.get("input_tokens", 0), self.total_usage.get("output_tokens", 0))
             yield {"type": "result", "subtype": "success", "is_error": False,
                    "duration_ms": duration_ms, "num_turns": turn_count,
                    "result": text_result, "session_id": self._session_id,
                    "usage": self.total_usage}
         except Exception as e:
             duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+            logger.exception("submit_error session=%s duration=%dms", self._session_id[:8], duration_ms)
             yield {"type": "result", "subtype": "error_during_execution", "is_error": True,
                    "duration_ms": duration_ms, "result": "",
                    "session_id": self._session_id, "usage": self.total_usage,

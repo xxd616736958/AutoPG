@@ -2,8 +2,11 @@
 User hooks — Claude Code hooks system. Shell commands triggered by agent events.
 Configuration: ~/.db-claude/config.json → "hooks" field.
 """
-import os, json, asyncio, fnmatch
+import os, json, asyncio, fnmatch, logging, time
 from typing import Optional
+
+logger = logging.getLogger(__name__)
+hook_logger = logging.getLogger("db_claude.hooks")  # Separate file for audit
 
 
 def load_hooks_config() -> dict:
@@ -11,8 +14,11 @@ def load_hooks_config() -> dict:
     config_path = os.path.join(os.path.expanduser("~/.db-claude"), "config.json")
     try:
         with open(config_path) as f:
-            return json.load(f).get("hooks", {})
+            hooks = json.load(f).get("hooks", {})
+        logger.info("hooks_loaded events=%s count=%d", list(hooks.keys()), sum(len(v) for v in hooks.values()))
+        return hooks
     except Exception:
+        logger.debug("hooks_config_not_found path=%s", config_path)
         return {}
 
 
@@ -85,8 +91,14 @@ async def execute_matching_hooks(
         if not _match_matcher(matcher, tool_name, tool_args):
             continue
         env = build_hook_env(tool_name, tool_args)
+        t0 = time.time()
         result = await run_shell_hook(hook["command"], env)
+        elapsed = int((time.time() - t0) * 1000)
+        hook_logger.info("hook_exec event=%s tool=%s matcher=%s exit=%d stdout_len=%d stderr_len=%d duration_ms=%d",
+                         event, tool_name, matcher or "*", result["exit_code"],
+                         len(result["stdout"]), len(result["stderr"]), elapsed)
         if result["exit_code"] == 2:
+            hook_logger.warning("hook_blocked event=%s tool=%s reason=%s", event, tool_name, result["stderr"][:200])
             return result["stderr"].strip() or f"Blocked by {event} hook"
         if result["stdout"].strip():
             all_output.append(result["stdout"].strip())

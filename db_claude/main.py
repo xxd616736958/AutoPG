@@ -14,6 +14,7 @@ from pathlib import Path
 # Ensure we can import from the package
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from db_claude.utils.logger import setup_logging
 from db_claude.utils.config import get_global_config, load_config, save_config
 from db_claude.utils.session import resume_messages, list_sessions, load_session, get_last_session_id
 from db_claude.tools import ALL_TOOLS
@@ -298,6 +299,9 @@ def main():
     if args.init:
         _init_claude_md(args)
         sys.exit(0)
+
+    # Setup logging
+    setup_logging()
 
     # Load config
     config = load_config()
