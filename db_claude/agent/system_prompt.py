@@ -191,6 +191,29 @@ Use `isolation: "worktree"` to give the agent its own git worktree for parallel 
 Use `run_in_background: true` to run the agent asynchronously — you'll be notified when it completes."""
 
 
+def get_mcp_section(mcp_manager=None) -> str:
+    """List available MCP tools from connected servers."""
+    if mcp_manager is None or not mcp_manager.is_connected:
+        return ""
+    tools = mcp_manager.tools
+    if not tools:
+        return ""
+
+    lines = ["# MCP Tools", ""]
+    servers = {}
+    for tool in tools:
+        server = tool.name.split("__")[1] if "__" in tool.name else "unknown"
+        servers.setdefault(server, []).append(tool)
+
+    for server, stools in servers.items():
+        status = mcp_manager.status.get(server, "?")
+        lines.append(f"## {server} ({status})")
+        for tool in stools:
+            lines.append(f"- `{tool.name}`: {tool.description[:120]}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def get_skills_section() -> str:
     """List available skills from the registry. Matching Claude Code's skill listing."""
     from ..skills.loader import skill_registry

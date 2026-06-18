@@ -18,6 +18,7 @@ from db_claude.utils.logger import setup_logging
 from db_claude.utils.config import get_global_config, load_config, save_config
 from db_claude.utils.session import resume_messages, list_sessions, load_session, get_last_session_id
 from db_claude.skills.loader import load_all_skills, skill_registry
+from db_claude.mcp import MCPManager, load_mcp_configs
 from db_claude.tools import ALL_TOOLS
 from db_claude.agent.query_engine import QueryEngine
 from db_claude.cli.commands import SlashCommandHandler
@@ -161,9 +162,10 @@ def _format_tool_result(name: str, data: str) -> str:
     return lines[0][:120] if lines else text[:120]
 
 
-def _build_engine(args, config, non_interactive: bool = False, resume_sid: str = None) -> QueryEngine:
-    """Build a QueryEngine from args + config."""
-    tools_list = ALL_TOOLS
+def _build_engine(args, config, non_interactive: bool = False, resume_sid: str = None,
+                  mcp_tools: list = None) -> QueryEngine:
+    """Build a QueryEngine from args + config. MCP tools merged with built-in."""
+    tools_list = list(mcp_tools or []) + list(ALL_TOOLS)
 
     provider = args.provider or config.provider
     model = args.model or config.model
@@ -203,10 +205,10 @@ def _build_engine(args, config, non_interactive: bool = False, resume_sid: str =
     return engine
 
 
-async def run_interactive(args, config, resume_sid: str = None):
+async def run_interactive(args, config, resume_sid: str = None, mcp_tools: list = None):
     """Run the interactive REPL mode."""
     cmd_handler = SlashCommandHandler()
-    engine = _build_engine(args, config, non_interactive=False, resume_sid=resume_sid)
+    engine = _build_engine(args, config, non_interactive=False, resume_sid=resume_sid, mcp_tools=mcp_tools)
 
     # Print startup info
     print(f"\n  Provider: {config.provider}")
@@ -222,9 +224,9 @@ async def run_interactive(args, config, resume_sid: str = None):
     await repl.run()
 
 
-async def run_print_mode(args, config, resume_sid: str = None):
+async def run_print_mode(args, config, resume_sid: str = None, mcp_tools: list = None):
     """Run in non-interactive print mode (mirrors --print / -p)."""
-    engine = _build_engine(args, config, non_interactive=True, resume_sid=resume_sid)
+    engine = _build_engine(args, config, non_interactive=True, resume_sid=resume_sid, mcp_tools=mcp_tools)
 
     prompt = args.prompt or sys.stdin.read().strip()
     if not prompt:
@@ -307,6 +309,11 @@ def main():
     # Load skills
     load_all_skills()
 
+    # Load MCP servers
+    mcp_configs = load_mcp_configs()
+    mcp_manager = MCPManager()
+    mcp_tools = asyncio.run(mcp_manager.start(mcp_configs))
+
     # Load config
     config = load_config()
 
@@ -350,9 +357,9 @@ def main():
 
     # Run in appropriate mode
     if args.print or (args.prompt and not sys.stdin.isatty()):
-        asyncio.run(run_print_mode(args, config, resume_sid))
+        asyncio.run(run_print_mode(args, config, resume_sid, mcp_tools))
     else:
-        asyncio.run(run_interactive(args, config, resume_sid))
+        asyncio.run(run_interactive(args, config, resume_sid, mcp_tools))
 
 
 def _init_claude_md(args):
