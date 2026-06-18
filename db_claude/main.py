@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db_claude.utils.logger import setup_logging
 from db_claude.utils.config import get_global_config, load_config, save_config
 from db_claude.utils.session import resume_messages, list_sessions, load_session, get_last_session_id
+from db_claude.skills.loader import load_all_skills, skill_registry
 from db_claude.tools import ALL_TOOLS
 from db_claude.agent.query_engine import QueryEngine
 from db_claude.cli.commands import SlashCommandHandler
@@ -302,6 +303,9 @@ def main():
 
     # Setup logging
     setup_logging()
+
+    # Load skills
+    load_all_skills()
 
     # Load config
     config = load_config()

@@ -191,6 +191,26 @@ Use `isolation: "worktree"` to give the agent its own git worktree for parallel 
 Use `run_in_background: true` to run the agent asynchronously — you'll be notified when it completes."""
 
 
+def get_skills_section() -> str:
+    """List available skills from the registry. Matching Claude Code's skill listing."""
+    from ..skills.loader import skill_registry
+
+    skills = skill_registry.list_all()
+    if not skills:
+        return ""
+
+    lines = ["# Available Skills", ""]
+    for s in skills:
+        line = f"- `/{s.name}`: {s.description}"
+        if s.when_to_use:
+            line += f" — {s.when_to_use}"
+        if s.argument_hint:
+            line += f" (args: {s.argument_hint})"
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
 def get_tool_list_section(tools: list) -> str:
     """Build the tool listing section matching Claude Code's format."""
     lines = ["# Tools", "", "You have access to the following tools:"]
@@ -276,6 +296,8 @@ async def build_system_prompt(
             get_context_management_section(),
             "",
             get_agent_tool_section(),
+            "",
+            get_skills_section(),
             "",
             get_simple_system_section(),
             "",

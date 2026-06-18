@@ -21,7 +21,7 @@ from .plan_mode import enter_plan_mode, exit_plan_mode, enter_worktree, exit_wor
 from .cron import cron_create, cron_delete, cron_list
 # Orchestration
 from .agent_tool import agent
-from .skill import skill
+from .skill_tool import skill
 from .workflow import workflow
 from .monitor import monitor
 
