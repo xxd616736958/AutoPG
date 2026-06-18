@@ -11,19 +11,31 @@ import asyncio
 import argparse
 from pathlib import Path
 
-# Ensure we can import from the package
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Ensure this checkout wins over unrelated editable installs that may also
+# provide a db_claude package on sys.path.
+_pkg_root = str(Path(__file__).parent.parent)
+if sys.path[0] != _pkg_root:
+    try:
+        sys.path.remove(_pkg_root)
+    except ValueError:
+        pass
+    sys.path.insert(0, _pkg_root)
+if __package__:
+    import db_claude as _db_claude_pkg
+    _local_pkg_path = str(Path(__file__).parent)
+    if _local_pkg_path not in list(getattr(_db_claude_pkg, "__path__", [])):
+        _db_claude_pkg.__path__.insert(0, _local_pkg_path)
 
-from db_claude.utils.logger import setup_logging
-from db_claude.utils.config import get_global_config, load_config, save_config
-from db_claude.utils.session import resume_messages, list_sessions, load_session, get_last_session_id
-from db_claude.skills.loader import load_all_skills, skill_registry
-from db_claude.mcp import MCPManager, load_mcp_configs
-from db_claude.tools import ALL_TOOLS
-from db_claude.agent.query_engine import QueryEngine
-from db_claude.cli.commands import SlashCommandHandler
-from db_claude.cli.repl import ReplInterface
-from db_claude.context.memory import MemoryManager
+from .utils.logger import setup_logging
+from .utils.config import get_global_config, load_config, save_config
+from .utils.session import resume_messages, list_sessions, load_session, get_last_session_id
+from .skills.loader import load_all_skills, skill_registry
+from .mcp import MCPManager, load_mcp_configs
+from .tools import ALL_TOOLS
+from .agent.query_engine import QueryEngine
+from .cli.commands import SlashCommandHandler
+from .cli.repl import ReplInterface
+from .context.memory import MemoryManager
 
 
 def parse_args():
@@ -278,7 +290,7 @@ def main():
 
     # Show version
     if args.version:
-        from db_claude import __version__
+        from . import __version__
         print(f"db-claude v{__version__}")
         sys.exit(0)
 

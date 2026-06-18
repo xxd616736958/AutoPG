@@ -1,1 +1,1 @@
-"""Frontend layer — TUI and Web."""
+"""Frontend layer."""
