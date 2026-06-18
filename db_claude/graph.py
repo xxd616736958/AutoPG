@@ -144,6 +144,40 @@ def build_agent_graph(
 
 compiled_graph = None  # Built lazily
 
+
+def create_checkpointer(backend: str = "sqlite", **kwargs):
+    """Factory: create checkpointer from config. Default: SQLite."""
+    if backend == "sqlite":
+        import os
+        db_path = kwargs.get("db_path") or os.path.join(
+            os.path.expanduser("~/.db-claude"), "checkpoints", "sessions.db"
+        )
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        try:
+            from langgraph.checkpoint.sqlite import SqliteSaver
+            return SqliteSaver.from_conn_string(db_path)
+        except ImportError:
+            return MemorySaver()
+    elif backend == "memory":
+        return MemorySaver()
+    else:
+        return MemorySaver()
+
+
+def load_checkpointer_from_config(config: dict = None):
+    """Read checkpoint config from config dict."""
+    import os, json
+    if config is None:
+        try:
+            with open(os.path.join(os.path.expanduser("~/.db-claude"), "config.json")) as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+    cp = config.get("checkpoint", {})
+    backend = cp.get("backend", "sqlite")
+    kwargs = cp.get(backend, {})
+    return create_checkpointer(backend, **kwargs)
+
 # Side channel: hook output indexed by tool_call_id (ToolNode rebuilds ToolMessage, discarding custom attrs)
 _hook_outputs: dict[str, str] = {}
 
