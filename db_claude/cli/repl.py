@@ -157,9 +157,10 @@ class ReplInterface:
                         # Format call line
                         native = None
                         for t in self.engine.tools:
-                            if t.name == name or name in (t.aliases or []):
+                            aliases = getattr(t, "aliases", []) or []
+                            if t.name == name or name in aliases:
                                 native = t; break
-                        call_display = native.format_call(args) if native else name
+                        call_display = native.format_call(args) if native and hasattr(native, "format_call") else name
                         self.console.print(f"[dim]⏺ {call_display}[/dim]")
                 elif content:
                     self.console.print(Markdown(content))
@@ -170,13 +171,14 @@ class ReplInterface:
                 # Try to format result
                 native = None
                 for t in self.engine.tools:
-                    if t.name == name or name in (t.aliases or []):
+                    aliases = getattr(t, "aliases", []) or []
+                    if t.name == name or name in aliases:
                         native = t; break
                 try:
                     data = json.loads(content) if content.startswith("{") else content
                 except:
                     data = content
-                result_display = native.format_result(data) if native else content[:120]
+                result_display = native.format_result(data) if native and hasattr(native, "format_result") else content[:120]
                 self.console.print(f"[dim]  ⎿  {result_display}[/dim]")
 
         sys.stdout.write("\n")
@@ -318,9 +320,10 @@ class ReplInterface:
                         args = event.get("args", {})
                         native = None
                         for t in self.engine.tools:
-                            if t.name == name or name in (t.aliases or []):
+                            aliases = getattr(t, "aliases", []) or []
+                            if t.name == name or name in aliases:
                                 native = t; break
-                        call_display = native.format_call(args) if native else f"{name}"
+                        call_display = native.format_call(args) if native and hasattr(native, "format_call") else f"{name}"
                     sys.stdout.write(f"\n⏺ {call_display}\n")
                     sys.stdout.flush()
                     current_tool = name

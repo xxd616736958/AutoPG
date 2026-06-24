@@ -4,7 +4,7 @@ QueryEngine — thin shell over compiled graph. ToolNode handles events.
 import os, uuid, time, asyncio, logging
 from typing import Optional, Callable
 from datetime import datetime
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 logger = logging.getLogger(__name__)
 
@@ -122,11 +122,48 @@ class QueryEngine:
             )
             self._sys_prompt_cache = "\n\n".join(p for p in parts if p)
 
+    def _drop_incomplete_trailing_tool_turn(self):
+        """Remove assistant tool-call messages that do not have matching ToolMessages.
+
+        OpenAI-compatible APIs reject any history where an AIMessage with
+        tool_calls is not followed by one ToolMessage for every tool_call_id.
+        This can happen if a prior turn crashed while formatting/displaying a
+        tool event before the ToolNode completed.
+        """
+        cleaned = []
+        msgs = list(self.mutable_messages)
+        i = 0
+        changed = False
+        while i < len(msgs):
+            msg = msgs[i]
+            if isinstance(msg, AIMessage) and (getattr(msg, "tool_calls", None) or []):
+                tool_calls = getattr(msg, "tool_calls", None) or []
+                required = [tc.get("id") for tc in tool_calls if tc.get("id")]
+                j = i + 1
+                following_tools = []
+                while j < len(msgs) and isinstance(msgs[j], ToolMessage):
+                    following_tools.append(msgs[j])
+                    j += 1
+                seen = {getattr(m, "tool_call_id", None) for m in following_tools}
+                if required and set(required).issubset(seen):
+                    cleaned.append(msg)
+                    cleaned.extend(following_tools)
+                else:
+                    changed = True
+                i = j
+                continue
+            cleaned.append(msg)
+            i += 1
+        if changed:
+            self.mutable_messages = cleaned
+            self._graph = None
+
     async def submit_message(self, prompt: str, options: dict = None):
         start_time = datetime.now()
         await self._ensure_sys_prompt()
         logger.info("submit_start session=%s prompt_len=%d", self._session_id[:8], len(prompt))
 
+        self._drop_incomplete_trailing_tool_turn()
         user_msg = HumanMessage(content=prompt)
         self.mutable_messages.append(user_msg)
         enqueue_write(self._session_id, _serialize(user_msg))
@@ -221,5 +258,6 @@ class QueryEngine:
 
     def _find_tool(self, name: str):
         for t in self.tools:
-            if t.name == name or name in (t.aliases or []): return t
+            aliases = getattr(t, "aliases", []) or []
+            if t.name == name or name in aliases: return t
         return None

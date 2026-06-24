@@ -238,7 +238,12 @@ def get_tool_list_section(tools: list) -> str:
     """Build the tool listing section matching Claude Code's format."""
     lines = ["# Tools", "", "You have access to the following tools:"]
     for tool in tools:
-        schema = tool.args_schema.model_json_schema() if getattr(tool, 'args_schema', None) else {}
+        if getattr(tool, 'args_schema', None):
+            schema = (tool.args_schema.model_json_schema()
+                      if hasattr(tool.args_schema, 'model_json_schema')
+                      else dict(tool.args_schema))
+        else:
+            schema = {}
         props = schema.get("properties", {})
         required = schema.get("required", [])
 

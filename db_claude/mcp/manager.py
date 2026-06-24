@@ -79,13 +79,16 @@ class MCPManager:
         try:
             from langchain_mcp_adapters.client import MultiServerMCPClient
             self._client = MultiServerMCPClient(connections=connections)
-            await self._client.__aenter__()
 
-            # Load tools with mcp__<server>__ prefix
-            raw_tools = self._client.get_tools()
+            # Load tools with mcp__<server>__ prefix.  langchain-mcp-adapters
+            # >=0.1.0 no longer supports using MultiServerMCPClient as an
+            # async context manager; get_tools() opens the configured sessions
+            # as needed and returns LangChain-compatible tools.
+            raw_tools = await self._client.get_tools()
             prefixed_tools = []
             for tool in raw_tools:
-                server = getattr(tool, 'metadata', {}).get('server_name', '')
+                metadata = getattr(tool, 'metadata', None) or {}
+                server = metadata.get('server_name', '')
                 if not server:
                     # Infer server from tool name if metadata missing
                     for sname in connections:
@@ -116,11 +119,6 @@ class MCPManager:
     async def stop(self):
         """Close all MCP connections."""
         if self._client:
-            try:
-                await self._client.__aexit__(None, None, None)
-            except Exception as e:
-                logger.warning("mcp_stop_error error=%s", str(e))
-            finally:
-                self._client = None
-                self._tools = []
-                logger.info("mcp_stopped")
+            self._client = None
+            self._tools = []
+            logger.info("mcp_stopped")
