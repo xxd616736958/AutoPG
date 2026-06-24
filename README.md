@@ -94,6 +94,8 @@ source .venv/bin/activate
 pip install -e .
 ```
 
+`pyproject.toml` is the source of truth for Python dependencies. `requirements.txt` is intentionally kept as a thin compatibility wrapper that runs `pip install -e .` for platforms that still expect a requirements file.
+
 ## Configure the LLM
 
 Create or edit:
@@ -289,8 +291,13 @@ brew services restart postgresql@17
 
 ## MCP configuration override
 
-Built-in MCP is enough for most deployments. If you want to override it, create
-`.claude/.mcp.json`:
+Built-in MCP is enough for most deployments. If you want to override it, copy the committed example file:
+
+```bash
+cp .claude/.mcp.example.json .claude/.mcp.json
+```
+
+Then edit `.claude/.mcp.json`:
 
 ```json
 {

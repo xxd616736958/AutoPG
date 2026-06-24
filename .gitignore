@@ -35,7 +35,8 @@ Thumbs.db
 references/
 
 # Misc local files
-.claude/
+.claude/*
+!.claude/.mcp.example.json
 hello_world.py
 pet_hospital.html
 /tmp/
