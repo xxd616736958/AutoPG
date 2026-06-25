@@ -2,9 +2,10 @@
   "mcpServers": {
     "postgres": {
       "type": "stdio",
-      "command": "uvx",
+      "command": "python",
       "args": [
-        "postgres-mcp",
+        "-m",
+        "postgres_mcp",
         "--access-mode=restricted"
       ],
       "env": {

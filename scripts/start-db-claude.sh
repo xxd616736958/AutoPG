@@ -18,7 +18,7 @@ warn() { printf '\033[1;33m[db-claude]\033[0m %s\n' "$*"; }
 
 log "Project: $PROJECT_DIR"
 log "Database URI: ${DB_CLAUDE_DATABASE_URI}"
-log "Postgres MCP access mode: ${DB_CLAUDE_POSTGRES_ACCESS_MODE}"
+log "PostgreSQL MCP access mode: ${DB_CLAUDE_POSTGRES_ACCESS_MODE}"
 
 if [[ "$DB_CLAUDE_START_POSTGRES" != "false" ]]; then
   if ! pg_isready -h localhost -p 5432 >/dev/null 2>&1; then
@@ -40,13 +40,31 @@ log "Testing database connection..."
 psql "$DB_CLAUDE_DATABASE_URI" -c "select current_database() as database, current_user as user, version();" >/tmp/db-claude-db-check.out
 cat /tmp/db-claude-db-check.out
 
-log "Testing built-in postgres-mcp through db-claude..."
-python -m db_claude.main --print "列出所有 schema" >/tmp/db-claude-mcp-check.out 2>&1 || {
+log "Testing built-in postgres_mcp through db-claude MCP manager..."
+python - <<'PYSMOKE' >/tmp/db-claude-mcp-check.out 2>&1
+import asyncio
+from db_claude.mcp import MCPManager, load_mcp_configs
+
+async def main():
+    manager = MCPManager()
+    tools = await manager.start(load_mcp_configs())
+    names = [t.name for t in tools]
+    print("tools=", names)
+    tool = next((t for t in tools if t.name == "mcp__postgres__list_schemas"), None)
+    if tool is None:
+        raise RuntimeError("mcp__postgres__list_schemas not found")
+    result = await tool.ainvoke({})
+    print(str(result)[:1000])
+    await manager.stop()
+
+asyncio.run(main())
+PYSMOKE
+if [[ $? -ne 0 ]]; then
   cat /tmp/db-claude-mcp-check.out
-  warn "db-claude + postgres-mcp smoke test failed."
+  warn "db-claude + postgres_mcp smoke test failed."
   exit 1
-}
-tail -n 30 /tmp/db-claude-mcp-check.out
+fi
+cat /tmp/db-claude-mcp-check.out
 
 case "$DB_CLAUDE_MODE" in
   interactive)

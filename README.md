@@ -1,9 +1,9 @@
 # db-claude — PostgreSQL Tuning Agent
 
 `db-claude` is a professional PostgreSQL database tuning agent built with
-LangChain, LangGraph, and a built-in `postgres-mcp` integration.
+LangChain, LangGraph, and a vendored/in-tree `postgres_mcp` package.
 
-The project packages the agent runtime and PostgreSQL MCP tool together so that
+The project packages the agent runtime and PostgreSQL MCP server source together so that
 one command can start a database-aware assistant for schema exploration, health
 checks, slow-query analysis, execution-plan inspection, and index tuning.
 
@@ -11,7 +11,7 @@ checks, slow-query analysis, execution-plan inspection, and index tuning.
 
 - List schemas, tables, views, sequences, and indexes.
 - Inspect table structure, DDL, columns, constraints, and index definitions.
-- Run safe SQL through `postgres-mcp`.
+- Run safe SQL through `postgres_mcp`.
 - Analyze database health:
   - invalid indexes
   - duplicate indexes
@@ -36,12 +36,12 @@ db-claude CLI / API
   ↓
 LangGraph agent loop
   ↓
-Built-in tools + built-in postgres-mcp
+Built-in tools + built-in postgres_mcp
   ↓
 PostgreSQL
 ```
 
-`postgres-mcp` is built in by default. You do **not** need to create a local
+`postgres_mcp` is built in by default. You do **not** need to create a local
 `.claude/.mcp.json` for normal usage. The MCP loader automatically creates a
 `postgres` server using these environment variables:
 
@@ -50,11 +50,30 @@ PostgreSQL
 | `DB_CLAUDE_ENABLE_POSTGRES_MCP` | `true` | Enable built-in PostgreSQL MCP |
 | `DB_CLAUDE_DATABASE_URI` | `postgresql://$USER@localhost:5432/db_agent` | PostgreSQL connection URI |
 | `DB_CLAUDE_POSTGRES_ACCESS_MODE` | `restricted` | `restricted` or `unrestricted` |
-| `DB_CLAUDE_POSTGRES_MCP_COMMAND` | `uvx` | Command used to launch MCP |
-| `DB_CLAUDE_POSTGRES_MCP_PACKAGE` | `postgres-mcp` | Package/entrypoint passed to `uvx` |
+| `DB_CLAUDE_POSTGRES_MCP_COMMAND` | `python` | Command used to launch the in-tree MCP package |
+| `DB_CLAUDE_POSTGRES_MCP_PACKAGE` | `-m` | Python module flag |
+| `DB_CLAUDE_POSTGRES_MCP_ENTRYPOINT` | `postgres_mcp` | In-tree MCP module entrypoint |
 
 If you do provide `~/.db-claude/config.json` `mcpServers` or project
 `.claude/.mcp.json`, those configs override the built-in one.
+
+## In-tree PostgreSQL MCP package
+
+The PostgreSQL MCP server source is vendored into this repository under:
+
+```text
+postgres_mcp/
+```
+
+The runtime starts it as:
+
+```bash
+python -m postgres_mcp --access-mode=restricted
+```
+
+This makes the repository a single deployable unit: installing `db-claude` also
+installs the PostgreSQL MCP server entrypoint and all shared dependencies from
+`pyproject.toml`.
 
 ## Requirements
 
@@ -62,7 +81,7 @@ If you do provide `~/.db-claude/config.json` `mcpServers` or project
 - Python 3.11+
 - PostgreSQL running locally or remotely
 - `psql` and `pg_isready` available on `PATH`
-- `uv` / `uvx` recommended
+- `uv` recommended for environment management, but not required at runtime
 - DeepSeek or Anthropic-compatible API key
 
 For Homebrew PostgreSQL:
@@ -72,7 +91,7 @@ brew install postgresql@17
 brew services start postgresql@17
 ```
 
-For `uv`:
+Optional `uv` install:
 
 ```bash
 brew install uv
@@ -158,7 +177,7 @@ It will:
 1. enter the project directory
 2. check/start PostgreSQL when possible
 3. verify the database connection
-4. verify db-claude + built-in postgres-mcp
+4. verify db-claude + built-in postgres_mcp
 5. start the interactive database tuning agent
 
 Common examples:
@@ -218,7 +237,7 @@ curl http://127.0.0.1:8010/api/sessions
 
 ## Stop services
 
-Stop db-claude API, standalone postgres-mcp processes, and leftover MCP child
+Stop db-claude API, standalone postgres_mcp/postgres_mcp processes, and leftover MCP child
 processes:
 
 ```bash
@@ -248,7 +267,7 @@ pg_isready -h localhost -p 5432
 psql "$DB_CLAUDE_DATABASE_URI" -c "select current_database(), current_user, version();"
 ```
 
-Check db-claude + built-in postgres-mcp:
+Check db-claude + built-in postgres_mcp:
 
 ```bash
 python -m db_claude.main --print "列出所有 schema"
@@ -304,8 +323,8 @@ Then edit `.claude/.mcp.json`:
   "mcpServers": {
     "postgres": {
       "type": "stdio",
-      "command": "uvx",
-      "args": ["postgres-mcp", "--access-mode=restricted"],
+      "command": "python",
+      "args": ["-m", "postgres_mcp", "--access-mode=restricted"],
       "env": {
         "DATABASE_URI": "postgresql://nncc@localhost:5432/db_agent"
       }
@@ -332,7 +351,7 @@ Recent compatibility fixes include:
 ```bash
 git status
 git add README.md pyproject.toml requirements.txt scripts/ db_claude/
-git commit -m "feat: package db-claude as PostgreSQL tuning agent with built-in postgres-mcp"
+git commit -m "feat: package db-claude as PostgreSQL tuning agent with built-in postgres_mcp"
 git push origin feature/database-agent-20260618
 ```
 

@@ -35,7 +35,7 @@ def _parse_server_config(name: str, cfg: dict, scope: str) -> McpServerConfig:
 
 
 def load_builtin_postgres_mcp() -> dict[str, McpServerConfig]:
-    """Create the built-in postgres-mcp config for the DB tuning agent.
+    """Create the built-in postgres_mcp config for the DB tuning agent.
 
     The project is intended to work out of the box as a database tuning agent.
     A user or project mcpServers.postgres entry can still override this config.
@@ -50,14 +50,15 @@ def load_builtin_postgres_mcp() -> dict[str, McpServerConfig]:
         database_uri = f"postgresql://{user}@localhost:5432/db_agent"
 
     access_mode = os.environ.get("DB_CLAUDE_POSTGRES_ACCESS_MODE", "restricted")
-    command = os.environ.get("DB_CLAUDE_POSTGRES_MCP_COMMAND", "uvx")
-    package = os.environ.get("DB_CLAUDE_POSTGRES_MCP_PACKAGE", "postgres-mcp")
+    command = os.environ.get("DB_CLAUDE_POSTGRES_MCP_COMMAND", "python")
+    package = os.environ.get("DB_CLAUDE_POSTGRES_MCP_PACKAGE", "-m")
+    entrypoint = os.environ.get("DB_CLAUDE_POSTGRES_MCP_ENTRYPOINT", "postgres_mcp")
 
     cfg = McpServerConfig(
         name="postgres",
         type="stdio",
         command=command,
-        args=[package, f"--access-mode={access_mode}"],
+        args=[package, entrypoint, f"--access-mode={access_mode}"],
         env={"DATABASE_URI": database_uri},
         scope="builtin",
     )
@@ -124,7 +125,7 @@ def load_mcp_configs(project_root: str = None) -> dict[str, McpServerConfig]:
     """Load all MCP configs. Priority: builtin < user < project."""
     all_configs = {}
 
-    # 1. Built-in postgres-mcp for database tuning agent (lowest priority)
+    # 1. Built-in postgres_mcp for database tuning agent (lowest priority)
     for name, cfg in load_builtin_postgres_mcp().items():
         all_configs[name] = cfg
 

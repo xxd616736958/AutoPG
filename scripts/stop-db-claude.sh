@@ -11,10 +11,12 @@ if lsof -tiTCP:"$DB_CLAUDE_API_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   kill $(lsof -tiTCP:"$DB_CLAUDE_API_PORT" -sTCP:LISTEN) 2>/dev/null || true
 fi
 
-log "Stopping standalone postgres-mcp SSE processes if running..."
+log "Stopping standalone postgres_mcp SSE processes if running..."
+pkill -f "postgres_mcp.*transport=sse" 2>/dev/null || true
 pkill -f "postgres-mcp.*transport=sse" 2>/dev/null || true
 
-log "Stopping leftover postgres-mcp stdio processes if running..."
+log "Stopping leftover postgres_mcp stdio processes if running..."
+pkill -f "postgres_mcp" 2>/dev/null || true
 pkill -f "postgres-mcp" 2>/dev/null || true
 
 if [[ "$DB_CLAUDE_STOP_POSTGRES" == "true" ]]; then
