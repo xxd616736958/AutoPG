@@ -167,7 +167,7 @@ When the conversation grows long, some or all of the current context is summariz
 
 
 def get_agent_tool_section() -> str:
-    """Mirrors the Agent tool section from prompts.ts. Dynamically includes available agents."""
+    """Agent tool section with Claude Code-style forked subagent guidance."""
     from ..agent.tools.agent_definitions import list_available_agents
 
     agents = list_available_agents()
@@ -177,18 +177,23 @@ def get_agent_tool_section() -> str:
         if a.when_to_use:
             agent_lines.append(f"  When: {a.when_to_use}")
 
-    return f"""# Agent Tool
-You have access to an Agent tool that can spawn subagents for parallel work or complex multi-step tasks.
+    return f"""# Agent Tool / Forked Subagents
+You have access to an `agent` tool that can fork isolated subagents for parallel work or complex multi-step tasks.
+
+## Subagent semantics
+- Each subagent runs in its own session and context.
+- A subagent can use only the tools allowed by its agent type.
+- Subagents do not ask the user questions and do not stream intermediate output to the parent.
+- The parent receives a compact final report.
+- Use `run_in_background=true` for long-running independent investigations; then call `task_output` with the returned `agent_id`.
 
 ## When to use
-Reach for this when the task matches an available agent type, when you have independent work to run in parallel, or when answering would mean reading across several files — delegate it and you keep the conclusion, not the file dumps.
+Use forked subagents when the task requires broad exploration, independent parallel investigations, or a specialized read-only/planning perspective while keeping the parent context focused.
 
-## Available agent types:
+## Available agent types
 {chr(10).join(agent_lines)}
 
-## Subagent isolation
-Use `isolation: "worktree"` to give the agent its own git worktree for parallel file mutations without conflicts.
-Use `run_in_background: true` to run the agent asynchronously — you'll be notified when it completes."""
+Always provide a precise prompt with expected output format, constraints, and any relevant file paths, schemas, SQL, or hypotheses."""
 
 
 def get_mcp_section(mcp_manager=None) -> str:

@@ -18,6 +18,7 @@ from pydantic import Field
 from pydantic import validate_call
 
 from postgres_mcp.index.dta_calc import DatabaseTuningAdvisor
+import json
 
 from .artifacts import ErrorResult
 from .artifacts import ExplainPlanArtifact
@@ -32,6 +33,7 @@ from .sql import SqlDriver
 from .sql import check_hypopg_installation_status
 from .sql import obfuscate_password
 from .top_queries import TopQueriesCalc
+from .pgbench import compare_runs, init_pgbench, run_pgbench
 
 # Initialize FastMCP with default settings
 mcp = FastMCP("postgres-mcp")
@@ -562,6 +564,210 @@ async def get_top_queries(
         return format_error_response(str(e))
 
 
+# Short aliases used by MCP skills and Claude-style tool names.
+mcp.add_tool(
+    explain_query,
+    name="explain",
+    description="Explain a SQL query execution plan",
+    annotations=ToolAnnotations(title="Explain Query", readOnlyHint=True),
+)
+mcp.add_tool(
+    analyze_db_health,
+    name="health_check",
+    description="Run PostgreSQL health checks over pg_stat_* and related views",
+    annotations=ToolAnnotations(title="PostgreSQL Health Check", readOnlyHint=True),
+)
+
+
+@mcp.prompt(name="db-tune-instance", description="PostgreSQL instance-level performance tuning — benchmark, analyze, tune, verify")
+def db_tune_instance() -> str:
+    return """---
+name: db-tune-instance
+description: PostgreSQL instance-level performance tuning — benchmark, analyze, tune, verify
+when_to_use: When the user asks to tune PostgreSQL performance at the instance level
+tools: [mcp__postgres__query, mcp__postgres__health_check, mcp__postgres__pgbench_init, mcp__postgres__pgbench_run, mcp__postgres__pgbench_compare, mcp__postgres__pgbench_cleanup, mcp__postgres__propose_change, bash, read]
+---
+
+# PostgreSQL Instance Tuning
+
+You are a PostgreSQL performance engineer. Follow this cycle:
+
+## Step 1: Initialize Benchmark Environment
+Use `mcp__postgres__pgbench_init` to create pgbench tables. Choose scale_factor based on available disk: 10 small, 50 medium, 100 large.
+
+## Step 2: Establish Baseline
+Use `mcp__postgres__pgbench_run` with save_as="baseline". Recommended: clients=10, threads=2, duration_sec=60, warmup_sec=10.
+
+## Step 3: Collect Performance Metrics
+Use `mcp__postgres__health_check` and read-only `mcp__postgres__query`, including pg_stat_statements top queries when available.
+
+## Step 4: Analyze and Hypothesize
+Identify the PRIMARY bottleneck. Pick ONE tuning action only.
+
+## Step 5: Propose Tuning Action
+Use `mcp__postgres__propose_change` with exact config/DDL, rationale, and expected impact. Wait for DBA approval before execution.
+
+## Step 6: Verify
+After approval/application, run `mcp__postgres__pgbench_run` with identical parameters, save_as="after_tuning", then `mcp__postgres__pgbench_compare` baseline vs after_tuning.
+
+## Step 7: Decide
+Improved and target met: report success. Improved but target not met: repeat from Step 3. Regressed: roll back and report. No change: revise hypothesis. Stop after 3 cycles without significant improvement.
+
+## Final Report Format
+Tuning Report: [Target Database]
+Date: [date]
+DBA Reviewer: [name]
+Baseline Metrics table; Changes Applied; Final Metrics comparison; Recommendations.
+"""
+
+
+@mcp.prompt(name="db-tune-sql", description="SQL query tuning — analyze execution plan, rewrite, index, verify")
+def db_tune_sql(query_or_id: str = "") -> str:
+    return f"""---
+name: db-tune-sql
+description: SQL query tuning — analyze execution plan, rewrite, index, verify
+when_to_use: When the user asks to tune a specific SQL query or slow query
+tools: [mcp__postgres__query, mcp__postgres__explain, mcp__postgres__pgbench_run, mcp__postgres__pgbench_compare, mcp__postgres__propose_change, bash, read]
+argument_hint: "<the slow SQL query or query_id from pg_stat_statements>"
+---
+
+# SQL Query Tuning
+
+Target query or query_id: {query_or_id}
+
+You are a SQL optimization specialist. Follow this cycle:
+
+## Step 1: Understand the Query
+If given a query_id, retrieve query text from pg_stat_statements. If given literal SQL, proceed directly.
+
+## Step 2: Analyze the Execution Plan
+Use `mcp__postgres__explain` (prefer analyze when safe) and inspect scans, joins, index usage, and row estimate errors.
+
+## Step 3: Collect Table Statistics
+Use read-only `mcp__postgres__query` for pg_stat_user_tables, pg_indexes, and pg_stats for referenced tables.
+
+## Step 4: Benchmark Current Query
+Use `mcp__postgres__pgbench_run` with script="custom" and custom_sql containing the target query. Save as before_optimization.
+
+## Step 5: Formulate ONE Optimization Strategy
+Choose one: add index, rewrite query, update statistics, adjust work_mem, or materialized view.
+
+## Step 6: Propose Optimization
+Use `mcp__postgres__propose_change` with exact DDL/query rewrite, rationale from plan, and expected improvement. Wait for DBA approval.
+
+## Step 7: Verify
+Run same custom pgbench parameters save_as="after_optimization", then compare before_optimization vs after_optimization.
+
+## Step 8: Decide
+Improved and target met: report success. Improved but not met: try next strategy. Regression: roll back. Stop after 3 cycles without improvement.
+
+## Final Report Format
+SQL Tuning Report: [Query Identifier]
+Original Query; Execution Plan Before; Optimizations Applied; Performance Comparison; Recommendations.
+"""
+
+
+@mcp.tool(
+    description="Initialize pgbench benchmark tables in the target database.",
+    annotations=ToolAnnotations(title="Initialize pgbench", destructiveHint=True),
+)
+async def pgbench_init(
+    database: str = Field(description="Target database name for pgbench tables"),
+    scale_factor: int = Field(default=10, description="Scale factor (1 ≈ 15MB, 100 ≈ 1.5GB)"),
+    foreign_keys: bool = Field(default=True, description="Include foreign key constraints"),
+) -> ResponseType:
+    """Initialize pgbench tables before benchmarking."""
+    try:
+        result = await init_pgbench(db_connection, database, scale_factor, foreign_keys)
+        return format_text_response(json.dumps(result, indent=2, default=str))
+    except Exception as e:
+        logger.error(f"Error initializing pgbench: {e}")
+        return format_error_response(str(e))
+
+
+@mcp.tool(
+    description="Run pgbench with warmup and return structured performance metrics.",
+    annotations=ToolAnnotations(title="Run pgbench", readOnlyHint=True),
+)
+async def pgbench_run(
+    database: str = Field(description="Target database"),
+    clients: int = Field(default=10, description="Number of concurrent clients"),
+    threads: int = Field(default=2, description="Number of worker threads"),
+    duration_sec: int = Field(default=60, description="Benchmark duration in seconds"),
+    warmup_sec: int = Field(default=10, description="Warmup duration (excluded from results)"),
+    script: str = Field(default="tpcb-like", description="Built-in: tpcb-like, simple-update, select-only, or custom"),
+    save_as: str = Field(default="latest", description="Label to save results for comparison"),
+    custom_sql: str | None = Field(default=None, description="SQL script text when script='custom'"),
+) -> ResponseType:
+    """Run pgbench and save the normalized results under a label."""
+    try:
+        sql_driver = await get_sql_driver()
+        result = await run_pgbench(
+            db_connection, sql_driver, database, clients, threads, duration_sec, warmup_sec, script, save_as, custom_sql
+        )
+        return format_text_response(json.dumps(result.__dict__, indent=2, default=str))
+    except Exception as e:
+        logger.error(f"Error running pgbench: {e}")
+        return format_error_response(str(e))
+
+
+@mcp.tool(
+    description="Compare two saved pgbench runs and return TPS/latency deltas with a verdict.",
+    annotations=ToolAnnotations(title="Compare pgbench runs", readOnlyHint=True),
+)
+async def pgbench_compare(
+    run_a: str = Field(description="Label of first run (e.g., 'baseline')"),
+    run_b: str = Field(description="Label of second run (e.g., 'after_tuning')"),
+) -> ResponseType:
+    """Compare two pgbench runs."""
+    try:
+        return format_text_response(json.dumps(compare_runs(run_a, run_b), indent=2, default=str))
+    except Exception as e:
+        logger.error(f"Error comparing pgbench runs: {e}")
+        return format_error_response(str(e))
+
+
+@mcp.tool(
+    description="Drop pgbench tables and free disk space after tuning is complete.",
+    annotations=ToolAnnotations(title="Clean pgbench", destructiveHint=True),
+)
+async def pgbench_cleanup(
+    database: str = Field(description="Target database to clean"),
+) -> ResponseType:
+    """Drop pgbench benchmark tables."""
+    try:
+        # The MCP server process is already connected to the benchmark target database.
+        # The database argument is echoed for the agent/report.
+        sql_driver = SqlDriver(conn=db_connection)
+        await sql_driver.execute_query(
+            "DROP TABLE IF EXISTS pgbench_history, pgbench_tellers, pgbench_accounts, pgbench_branches CASCADE"
+        )
+        return format_text_response(json.dumps({"database": database, "dropped": True}, indent=2))
+    except Exception as e:
+        logger.error(f"Error cleaning pgbench tables: {e}")
+        return format_error_response(str(e))
+
+
+@mcp.tool(
+    description="Submit a proposed DDL/DML/config change for DBA approval. Does not execute the change.",
+    annotations=ToolAnnotations(title="Propose Change", readOnlyHint=True),
+)
+async def propose_change(
+    change: str = Field(description="Exact DDL/DML/config change to propose"),
+    rationale: str = Field(description="Why this change is recommended"),
+    expected_impact: str = Field(description="Expected performance impact"),
+) -> ResponseType:
+    """Record a proposed change for human DBA approval."""
+    proposal = {
+        "status": "pending_approval",
+        "change": change,
+        "rationale": rationale,
+        "expected_impact": expected_impact,
+        "message": "Proposal recorded. Wait for DBA approval before execution.",
+    }
+    return format_text_response(json.dumps(proposal, indent=2))
+
+
 async def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="PostgreSQL MCP Server")
@@ -613,22 +819,36 @@ async def main():
 
     # Add the query tool with a description and annotations appropriate to the access mode
     if current_access_mode == AccessMode.UNRESTRICTED:
+        sql_annotations = ToolAnnotations(
+            title="Execute SQL",
+            destructiveHint=True,
+        )
         mcp.add_tool(
             execute_sql,
             description="Execute any SQL query",
-            annotations=ToolAnnotations(
-                title="Execute SQL",
-                destructiveHint=True,
-            ),
+            annotations=sql_annotations,
+        )
+        mcp.add_tool(
+            execute_sql,
+            name="query",
+            description="Execute any SQL query",
+            annotations=sql_annotations,
         )
     else:
+        sql_annotations = ToolAnnotations(
+            title="Execute SQL (Read-Only)",
+            readOnlyHint=True,
+        )
         mcp.add_tool(
             execute_sql,
             description="Execute a read-only SQL query",
-            annotations=ToolAnnotations(
-                title="Execute SQL (Read-Only)",
-                readOnlyHint=True,
-            ),
+            annotations=sql_annotations,
+        )
+        mcp.add_tool(
+            execute_sql,
+            name="query",
+            description="Execute a read-only SQL query",
+            annotations=sql_annotations,
         )
 
     logger.info(f"Starting PostgreSQL MCP Server in {current_access_mode.upper()} mode")

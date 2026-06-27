@@ -44,7 +44,7 @@ EXPLORE_AGENT = AgentDefinition(
         "- Return structured results with file paths and line numbers.\n"
         "- If you find nothing, say so clearly — don't fabricate results."
     ),
-    tools=["Read", "Glob", "Grep", "WebSearch", "WebFetch"],
+    tools=["read", "glob", "grep", "web_search", "web_fetch"],
     model="inherit",
     max_turns=20,
     permission_mode="default",
@@ -70,7 +70,7 @@ PLAN_AGENT = AgentDefinition(
         "CRITICAL: You are in Plan mode. Do NOT write code. Do NOT edit files. "
         "Only read and design. Output your plan for user approval."
     ),
-    tools=["Read", "Glob", "Grep"],
+    tools=["read", "glob", "grep"],
     model="inherit",
     max_turns=30,
     permission_mode="plan",
@@ -87,13 +87,13 @@ GENERAL_PURPOSE_AGENT = AgentDefinition(
     system_prompt="",  # Inherits parent system prompt
     tools=["*"],
     disallowed_tools=[
-        "Agent",           # No recursive subagent spawning
-        "AskUserQuestion", # Cannot ask user questions
-        "TaskStop",        # Cannot stop tasks
-        "Workflow",        # Cannot orchestrate workflows
-        "EnterPlanMode",   # Cannot enter plan mode
-        "ExitPlanMode",    # Cannot exit plan mode
-        "Skill",           # Cannot invoke skills
+        "agent",           # No recursive subagent spawning
+        "ask_user_question", # Cannot ask user questions
+        "task_stop",        # Cannot stop tasks
+        "workflow",        # Cannot orchestrate workflows
+        "enter_plan_mode",   # Cannot enter plan mode
+        "exit_plan_mode",    # Cannot exit plan mode
+        "skill",           # Cannot invoke skills
     ],
     model="inherit",
     max_turns=50,

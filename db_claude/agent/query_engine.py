@@ -184,7 +184,10 @@ class QueryEngine:
         )
 
         graph = self._get_graph(self._hooks_config)
-        config = {"configurable": {"thread_id": self._session_id, "_context": context}}
+        config = {
+            "configurable": {"thread_id": self._session_id, "_context": context},
+            "recursion_limit": max(50, self.max_turns * 3),
+        }
 
         try:
             accumulated_text = ""; turn_count = 0

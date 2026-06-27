@@ -4,7 +4,7 @@ Module-level compiled_graph for langgraph serve.
 """
 import os, json, uuid
 from typing import Optional, Callable
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage, HumanMessage, ToolMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
@@ -56,6 +56,26 @@ def build_agent_graph(
         except Exception:
             return await execute(request)
         tool_args = request.tool_call.get("args", {})
+        if tool_name == "skill":
+            from langchain_core.messages import ToolMessage
+            skill_name = tool_args.get("skill") if isinstance(tool_args, dict) else None
+            if skill_name:
+                marker = f"DB_CLAUDE_SKILL_RUNNING_{skill_name}"
+                try:
+                    import os, time
+                    ts = float(os.environ.get(marker, "0") or "0")
+                    if ts and time.time() - ts < 30:
+                        return ToolMessage(
+                            content=json.dumps({
+                                "status": "already_loaded",
+                                "skill": skill_name,
+                                "instruction": f"The {skill_name} skill is already loaded/running. Continue executing its instructions; do not call the skill tool again.",
+                            }),
+                            tool_call_id=request.tool_call.get("id", ""),
+                            name=tool_name,
+                        )
+                except Exception:
+                    pass
         if hooks_config.get("PreToolUse"):
             block = await execute_matching_hooks("PreToolUse", tool_name, tool_args, hooks_config)
             if block and "Blocked" in str(block):
@@ -74,6 +94,56 @@ def build_agent_graph(
                 sys.stdout.write("\n")
                 sys.stdout.flush()
         return result
+
+
+    def _skill_injection_messages(messages: list) -> list[HumanMessage]:
+        """Turn loaded skill tool results into explicit user instructions once.
+
+        The skill tool itself is a loader. Some models will repeatedly call it
+        because the original user request still matches the skill. Injecting the
+        loaded prompt as a synthetic user instruction makes the next agent turn
+        execute the method, and the marker prevents re-injection loops.
+        """
+        existing_markers = set()
+        for msg in messages:
+            content = getattr(msg, "content", "")
+            if isinstance(content, str) and "<!-- db-claude-skill-loaded:" in content:
+                start = content.find("<!-- db-claude-skill-loaded:") + len("<!-- db-claude-skill-loaded:")
+                end = content.find(" -->", start)
+                if end > start:
+                    existing_markers.add(content[start:end])
+
+        injected: list[HumanMessage] = []
+        for msg in messages:
+            if not isinstance(msg, ToolMessage) or getattr(msg, "name", "") != "skill":
+                continue
+            raw = getattr(msg, "content", "")
+            try:
+                payload = json.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                continue
+            if not isinstance(payload, dict) or payload.get("status") != "loaded":
+                continue
+            skill_name = payload.get("skill") or "unknown"
+            if skill_name in existing_markers:
+                continue
+            prompt = payload.get("prompt", "")
+            if not prompt:
+                continue
+            existing_markers.add(skill_name)
+            injected.append(HumanMessage(content=(
+                f"<!-- db-claude-skill-loaded:{skill_name} -->\n"
+                f"The `{skill_name}` skill is now loaded. Do not call the skill tool for `{skill_name}` again in this task. "
+                "Follow these instructions directly and continue the user's request.\n\n"
+                f"{prompt}"
+            )))
+        return injected
+
+    async def process_tool_results(state, config, *, runtime=None):
+        injections = _skill_injection_messages(list(state.get("messages", [])))
+        if injections:
+            return {"messages": injections}
+        return {}
 
     workflow = StateGraph(AgentState)
 
@@ -131,13 +201,15 @@ def build_agent_graph(
     # ═══════════════════════════════════════════════════
 
     tool_node = ToolNode(tools, handle_tool_errors=True,
-                        awrap_tool_call=_tool_hook_wrapper if hooks_config else None)
+                        awrap_tool_call=_tool_hook_wrapper)
 
     workflow.add_node("agent", call_model)
     workflow.add_node("tools", tool_node)
+    workflow.add_node("process_tool_results", process_tool_results)
     workflow.set_entry_point("agent")
     workflow.add_conditional_edges("agent", tools_condition, {"tools": "tools", END: END})
-    workflow.add_edge("tools", "agent")
+    workflow.add_edge("tools", "process_tool_results")
+    workflow.add_edge("process_tool_results", "agent")
 
     return workflow.compile(checkpointer=checkpointer or MemorySaver())
 

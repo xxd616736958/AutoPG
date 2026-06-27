@@ -1,5 +1,5 @@
 """Skill tool — matching Claude Code's SkillTool. Injects prompt as user message."""
-import json, logging
+import json, logging, time
 from pydantic import Field
 from langchain_core.tools import tool
 
@@ -21,6 +21,22 @@ async def skill(
     Do not invoke a skill that is already running.
     Do not use this tool for built-in CLI commands like /help or /clear.
     """
+    # Suppress duplicate skill calls in the same task. Models may emit multiple
+    # identical skill tool calls before the first result is injected into state.
+    try:
+        import os
+        marker = f"DB_CLAUDE_SKILL_RUNNING_{skill}"
+        ts = float(os.environ.get(marker, "0") or "0")
+        if ts and time.time() - ts < 30:
+            return json.dumps({
+                "status": "already_loaded",
+                "skill": skill,
+                "instruction": f"The {skill} skill is already loaded/running. Continue executing its instructions; do not call the skill tool again.",
+            })
+        os.environ[marker] = str(time.time())
+    except Exception:
+        pass
+
     skill_def = skill_registry.get(skill)
     if not skill_def:
         available = [s.name for s in skill_registry.list_all()]
