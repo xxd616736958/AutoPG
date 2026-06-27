@@ -15,7 +15,7 @@ from db_claude.agent.query_engine import QueryEngine
 
 # DeepSeek config
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
-DEEPSEEK_MODEL = "deepseek-v4-flash"
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
 
 def print_section(title: str):
