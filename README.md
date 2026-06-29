@@ -7,6 +7,16 @@ The project packages the agent runtime and PostgreSQL MCP server source together
 one command can start a database-aware assistant for schema exploration, health
 checks, slow-query analysis, execution-plan inspection, and index tuning.
 
+## Open source
+
+This project is open source and publicly available on GitHub:
+
+```text
+https://github.com/xxd616736958/db-claude
+```
+
+It is released under the MIT License. See [`LICENSE`](LICENSE) for details.
+
 ## What this agent can do
 
 - List schemas, tables, views, sequences, and indexes.
