@@ -1,4 +1,4 @@
-# db-claude vs Claude Code — 特性对比矩阵
+# AutoPG Legacy Architecture Comparison — 特性对比矩阵
 
 > 图例: ✅ 已实现 | ❌ 未实现 | ⚠️ 部分实现
 
@@ -6,7 +6,7 @@
 
 ## 1. 智能体系统 (Agent System)
 
-| # | 特性 (Claude Code 源码) | 源码位置 | db-claude 状态 |
+| # | 特性 (legacy agent source) | 源码位置 | AutoPG 状态 |
 |---|------------------------|---------|---------------|
 | 1.1 | **QueryEngine** 类 — 拥有查询生命周期和会话状态 | `src/QueryEngine.ts:184` | ✅ `agent/query_loop.py:32 QueryEngine` |
 | 1.2 | **submitMessage()** 异步生成器 — 提交用户消息并运行 query 循环 | `src/QueryEngine.ts:209` | ✅ `agent/query_loop.py:101 submit_message()` |
@@ -29,7 +29,7 @@
 
 ## 2. 智能体架构安排 (Agent Architecture)
 
-| # | 特性 (Claude Code 源码) | 源码位置 | db-claude 状态 |
+| # | 特性 (legacy agent source) | 源码位置 | AutoPG 状态 |
 |---|------------------------|---------|---------------|
 | 2.1 | **State 类型** — messages, toolUseContext, autoCompactTracking 等 9 个字段 | `src/query.ts:204-217` | ✅ `agent/state.py AgentState` (27 字段) |
 | 2.2 | **while(true) 不可变 params + 可变 state** 模式 | `src/query.ts:253-268` | ⚠️ LangGraph StateGraph 语义不同 |
@@ -55,7 +55,7 @@
 | 2.22 | **taskBudget** — beta task_budgets-2026-03-13 | `src/query.ts:290-292` | ❌ 未实现 |
 | 2.23 | **queryTracking** — chainId/depth 追踪 | `src/query.ts:347-363` | ❌ 未实现 |
 | 2.24 | **QueuedCommand 消费** — 队列命令 mid-turn 注入 | `src/query.ts:1570-1643` | ❌ 未实现 |
-| 2.25 | **BG task summary** — 后台任务摘要 (claude ps) | `src/query.ts:1685-1702` | ❌ 未实现 |
+| 2.25 | **BG task summary** — 后台任务摘要 (autopg ps) | `src/query.ts:1685-1702` | ❌ 未实现 |
 | 2.26 | **session persistence** — transcript 记录+flush | `src/QueryEngine.ts:450-462` | ❌ 未实现 |
 | 2.27 | **结构化输出** — jsonSchema + SyntheticOutputTool | `src/QueryEngine.ts:1005-1048` | ❌ 未实现 |
 | 2.28 | **hasHandledOrphanedPermission** — 孤儿权限处理 | `src/QueryEngine.ts:398-408` | ❌ 未实现 |
@@ -64,7 +64,7 @@
 
 ## 3. 数据结构安排 (Data Structures)
 
-| # | 特性 (Claude Code 源码) | 源码位置 | db-claude 状态 |
+| # | 特性 (legacy agent source) | 源码位置 | AutoPG 状态 |
 |---|------------------------|---------|---------------|
 | 3.1 | **Message 联合类型** — user/assistant/system/progress/attachment | `src/types/message.ts:19-99` | ⚠️ 使用 LangChain BaseMessage |
 | 3.2 | **MessageBase** — uuid, parentUuid, timestamp, isMeta, isVirtual, toolUseResult, origin | `src/types/message.ts:6-17` | ⚠️ additional_kwargs 部分覆盖 |
@@ -95,7 +95,7 @@
 
 ## 4. 系统提示词 (System Prompt)
 
-| # | 特性 (Claude Code 源码) | 源码位置 | db-claude 状态 |
+| # | 特性 (legacy agent source) | 源码位置 | AutoPG 状态 |
 |---|------------------------|---------|---------------|
 | 4.1 | **getSimpleIntroSection** — 含 CYBER_RISK_INSTRUCTION | `src/constants/prompts.ts:175-184` | ✅ `get_simple_intro_section()` |
 | 4.2 | **getSimpleSystemSection** — 7 条系统规则 | `src/constants/prompts.ts:186-197` | ✅ `get_simple_system_section()` |
@@ -105,8 +105,8 @@
 | 4.6 | **getAgentToolSection** — Agent/Explore/Plan 子智能体 | prompts.ts | ✅ `get_agent_tool_section()` |
 | 4.7 | **getToolListSection** — 工具列表+参数+描述 | prompts.ts | ✅ `get_tool_list_section()` |
 | 4.8 | **CYBER_RISK_INSTRUCTION** | `src/constants/prompts.ts:100-102` | ✅ 已包含 |
-| 4.9 | **FRONTIER_MODEL_NAME** | `src/constants/prompts.ts:118` | ✅ `"Claude Opus 4.6"` |
-| 4.10 | **MODEL_IDS** — opus/sonnet/haiku | `src/constants/prompts.ts:121-125` | ✅ `MODEL_IDS` dict |
+| 4.9 | **FRONTIER_MODEL_NAME** | `src/constants/prompts.ts:118` | ❌ Removed provider-specific hardcoded frontier model |
+| 4.10 | **MODEL_IDS** — opus/sonnet/haiku | `src/constants/prompts.ts:121-125` | ❌ Removed provider-specific hardcoded model map |
 | 4.11 | **SYSTEM_PROMPT_DYNAMIC_BOUNDARY** — 全局缓存分割标记 | `src/constants/prompts.ts:114-115` | ❌ 未实现 (无跨用户缓存) |
 | 4.12 | **getHooksSection** — 用户钩子说明 | `src/constants/prompts.ts:127-129` | ✅ `get_hooks_section()` |
 | 4.13 | **getSystemRemindersSection** — system-reminder 标签说明 | `src/constants/prompts.ts:131-134` | ✅ `get_system_reminders_section()` |
@@ -120,7 +120,7 @@
 | 4.21 | **Bash prompt 策略** — 工具偏好 (Grep/Glob>bash, Read>cat, Edit>sed) | `src/tools/BashTool/prompt.ts` | ⚠️ 基础版 |
 | 4.22 | **Git 操作说明** — commit/PR 详细流程 | `src/tools/BashTool/prompt.ts` | ❌ 未实现 |
 | 4.23 | **Sandbox 说明** — 沙箱配置/绕过规则 | `src/tools/BashTool/prompt.ts` | ❌ 未实现 |
-| 4.24 | **commit attribution** — Co-Authored-By: Claude | `src/utils/attribution.ts` | ❌ 不需要 |
+| 4.24 | **commit attribution** — Co-Authored-By attribution | `src/utils/attribution.ts` | ❌ 不需要 |
 | 4.25 | **getSimpleDoingTasksSection** — 任务执行指导 | `src/constants/prompts.ts:199+` | ❌ 未实现 |
 | 4.26 | **asSystemPrompt** — 系统提示词类型包装 | `src/utils/systemPromptType.ts` | ⚠️ 简单字符串拼接 |
 | 4.27 | **systemPromptSection** / **DANGEROUS_uncachedSystemPromptSection** — 缓存分段 | `src/constants/systemPromptSections.ts` | ❌ 无缓存系统 |
@@ -133,7 +133,7 @@
 
 ## 5. 工具系统 (Tool System)
 
-| # | 特性 (Claude Code 源码) | 源码位置 | db-claude 状态 |
+| # | 特性 (legacy agent source) | 源码位置 | AutoPG 状态 |
 |---|------------------------|---------|---------------|
 | 5.1 | **Bash** — 完整 shell 执行 | `src/tools/BashTool/` | ✅ `tools/bash.py` |
 | 5.2 | **Bash — timeout** (600s max) | `BashTool/prompt.ts` | ✅ |
@@ -240,7 +240,7 @@
 
 ## 6. CLI (Command Line Interface)
 
-| # | 特性 (Claude Code 源码) | 源码位置 | db-claude 状态 |
+| # | 特性 (legacy agent source) | 源码位置 | AutoPG 状态 |
 |---|------------------------|---------|---------------|
 | 6.1 | **main.tsx** — CLI 入口点 | `src/main.tsx` | ✅ `main.py` |
 | 6.2 | **dev-entry.ts** — 开发入口 | `src/dev-entry.ts` | ✅ `main.py` |
@@ -274,7 +274,7 @@
 | 6.30 | **/run** — 运行应用 | `commands.ts` | ❌ |
 | 6.31 | **/verify** — 验证变更 | `commands.ts` | ❌ |
 | 6.32 | **/deep-research** — 深度研究 | `commands.ts` | ❌ |
-| 6.33 | **/init** — 初始化 CLAUDE.md | `commands.ts` | ❌ (仅 CLI flag) |
+| 6.33 | **/init** — 初始化 AUTOPG.md | `commands.ts` | ❌ (仅 CLI flag) |
 | 6.34 | **/statusline** — 状态行设置 | `commands.ts` | ❌ |
 | 6.35 | **Tab completion** — 命令补全 | `REPL.tsx` | ✅ CommandCompleter |
 | 6.36 | **history** — 命令历史 | `REPL.tsx` | ✅ FileHistory |
@@ -319,7 +319,7 @@
 
 ### 核心流正确但简化
 - ✅ LangGraph StateGraph 实现了 `agent→tools→agent` 的循环结构
-- ❌ 但不含 Claude Code 中的多种恢复路径 (prompt-too-long, max_output_tokens, reactiveCompact, collapse)
+- ❌ 但不含 legacy agent 中的多种恢复路径 (prompt-too-long, max_output_tokens, reactiveCompact, collapse)
 
 ### 工具覆盖率较高 (56%)  
 - ✅ 28 个核心工具已实现，覆盖了日常编码任务所需
@@ -330,8 +330,8 @@
 - ❌ 缺少流式输出、权限弹窗、工具进度显示等 TUI 特性
 
 ### 架构简化但不影响基本使用
-- 使用 LangChain/LangGraph 框架语义替代了 Claude Code 的手写循环
-- 数据结构使用 LangChain 标准 Message 类型，而非 Claude Code 的自定义类型
+- 使用 LangChain/LangGraph 框架语义替代了 legacy agent 的手写循环
+- 数据结构使用 LangChain 标准 Message 类型，而非 legacy agent 的自定义类型
 
 ### 未实现的大块功能
 - **MCP 协议**: 整个 MCP 工具栈未实现

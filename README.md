@@ -1,6 +1,6 @@
-# db-claude — PostgreSQL Tuning Agent
+# AutoPG — PostgreSQL Tuning Agent
 
-`db-claude` is a professional PostgreSQL database tuning agent built with
+`AutoPG` is a professional PostgreSQL database tuning agent built with
 LangChain, LangGraph, and a vendored/in-tree `postgres_mcp` package.
 
 The project packages the agent runtime and PostgreSQL MCP server source together so that
@@ -12,7 +12,7 @@ checks, slow-query analysis, execution-plan inspection, and index tuning.
 This project is open source and publicly available on GitHub:
 
 ```text
-https://github.com/xxd616736958/db-claude
+https://github.com/xxd616736958/AutoPG
 ```
 
 It is released under the MIT License. See [`LICENSE`](LICENSE) for details.
@@ -42,7 +42,7 @@ It is released under the MIT License. See [`LICENSE`](LICENSE) for details.
 ```text
 User
   ↓
-db-claude CLI / API
+AutoPG CLI / API
   ↓
 LangGraph agent loop
   ↓
@@ -52,20 +52,20 @@ PostgreSQL
 ```
 
 `postgres_mcp` is built in by default. You do **not** need to create a local
-`.claude/.mcp.json` for normal usage. The MCP loader automatically creates a
+`.autopg/.mcp.json` for normal usage. The MCP loader automatically creates a
 `postgres` server using these environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `DB_CLAUDE_ENABLE_POSTGRES_MCP` | `true` | Enable built-in PostgreSQL MCP |
-| `DB_CLAUDE_DATABASE_URI` | `postgresql://$USER@localhost:5432/db_agent` | PostgreSQL connection URI |
-| `DB_CLAUDE_POSTGRES_ACCESS_MODE` | `restricted` | `restricted` or `unrestricted` |
-| `DB_CLAUDE_POSTGRES_MCP_COMMAND` | `python` | Command used to launch the in-tree MCP package |
-| `DB_CLAUDE_POSTGRES_MCP_PACKAGE` | `-m` | Python module flag |
-| `DB_CLAUDE_POSTGRES_MCP_ENTRYPOINT` | `postgres_mcp` | In-tree MCP module entrypoint |
+| `AUTOPG_ENABLE_POSTGRES_MCP` | `true` | Enable built-in PostgreSQL MCP |
+| `AUTOPG_DATABASE_URI` | `postgresql://$USER@localhost:5432/db_agent` | PostgreSQL connection URI |
+| `AUTOPG_POSTGRES_ACCESS_MODE` | `restricted` | `restricted` or `unrestricted` |
+| `AUTOPG_POSTGRES_MCP_COMMAND` | `python` | Command used to launch the in-tree MCP package |
+| `AUTOPG_POSTGRES_MCP_PACKAGE` | `-m` | Python module flag |
+| `AUTOPG_POSTGRES_MCP_ENTRYPOINT` | `postgres_mcp` | In-tree MCP module entrypoint |
 
-If you do provide `~/.db-claude/config.json` `mcpServers` or project
-`.claude/.mcp.json`, those configs override the built-in one.
+If you do provide `~/.autopg/config.json` `mcpServers` or project
+`.autopg/.mcp.json`, those configs override the built-in one.
 
 ## In-tree PostgreSQL MCP package
 
@@ -81,14 +81,14 @@ The runtime starts it as:
 python -m postgres_mcp --access-mode=restricted
 ```
 
-This makes the repository a single deployable unit: installing `db-claude` also
+This makes the repository a single deployable unit: installing `autopg` also
 installs the PostgreSQL MCP server entrypoint and all shared dependencies from
 `pyproject.toml`.
 
 ## Requirements
 
 - macOS/Linux
-- Python 3.11+
+- Python 3.12+
 - PostgreSQL running locally or remotely
 - `psql` and `pg_isready` available on `PATH`
 - `uv` recommended for environment management, but not required at runtime
@@ -110,8 +110,8 @@ brew install uv
 ## Installation
 
 ```bash
-git clone https://github.com/xxd616736958/db-claude.git
-cd db-claude
+git clone https://github.com/xxd616736958/AutoPG.git
+cd AutoPG
 pip install -e .
 ```
 
@@ -130,8 +130,8 @@ pip install -e .
 Create or edit:
 
 ```bash
-mkdir -p ~/.db-claude
-nano ~/.db-claude/config.json
+mkdir -p ~/.autopg
+nano ~/.autopg/config.json
 ```
 
 Example DeepSeek configuration:
@@ -159,19 +159,19 @@ export DEEPSEEK_API_KEY=sk-your-key
 Set the database URI:
 
 ```bash
-export DB_CLAUDE_DATABASE_URI="postgresql://nncc@localhost:5432/db_agent"
+export AUTOPG_DATABASE_URI="postgresql://nncc@localhost:5432/db_agent"
 ```
 
 The recommended default mode is read-only/restricted:
 
 ```bash
-export DB_CLAUDE_POSTGRES_ACCESS_MODE=restricted
+export AUTOPG_POSTGRES_ACCESS_MODE=restricted
 ```
 
 Use unrestricted mode only for development databases:
 
 ```bash
-export DB_CLAUDE_POSTGRES_ACCESS_MODE=unrestricted
+export AUTOPG_POSTGRES_ACCESS_MODE=unrestricted
 ```
 
 ## One-click startup
@@ -179,7 +179,7 @@ export DB_CLAUDE_POSTGRES_ACCESS_MODE=unrestricted
 The project includes a one-click startup script:
 
 ```bash
-./scripts/start-db-claude.sh
+./scripts/start-autopg.sh
 ```
 
 It will:
@@ -187,21 +187,21 @@ It will:
 1. enter the project directory
 2. check/start PostgreSQL when possible
 3. verify the database connection
-4. verify db-claude + built-in postgres_mcp
+4. verify AutoPG + built-in postgres_mcp
 5. start the interactive database tuning agent
 
 Common examples:
 
 ```bash
 # Start interactive tuning agent
-DB_CLAUDE_DATABASE_URI="postgresql://nncc@localhost:5432/db_agent" \
-./scripts/start-db-claude.sh
+AUTOPG_DATABASE_URI="postgresql://nncc@localhost:5432/db_agent" \
+./scripts/start-autopg.sh
 
 # Only run checks, do not enter REPL
-DB_CLAUDE_MODE=check ./scripts/start-db-claude.sh
+AUTOPG_MODE=check ./scripts/start-autopg.sh
 
 # Start FastAPI service instead of REPL
-DB_CLAUDE_MODE=api DB_CLAUDE_API_PORT=8010 ./scripts/start-db-claude.sh
+AUTOPG_MODE=api AUTOPG_API_PORT=8010 ./scripts/start-autopg.sh
 ```
 
 ## Daily usage
@@ -209,7 +209,7 @@ DB_CLAUDE_MODE=api DB_CLAUDE_API_PORT=8010 ./scripts/start-db-claude.sh
 Interactive mode:
 
 ```bash
-db-claude
+autopg
 ```
 
 Example prompts:
@@ -226,9 +226,9 @@ Example prompts:
 Non-interactive mode:
 
 ```bash
-python -m db_claude.main --print "列出所有 schema"
-python -m db_claude.main --print "进行数据库健康检查"
-python -m db_claude.main --print "查看最慢/最耗资源的查询"
+python -m autopg.main --print "列出所有 schema"
+python -m autopg.main --print "进行数据库健康检查"
+python -m autopg.main --print "查看最慢/最耗资源的查询"
 ```
 
 ## FastAPI mode
@@ -236,7 +236,7 @@ python -m db_claude.main --print "查看最慢/最耗资源的查询"
 Start API server:
 
 ```bash
-DB_CLAUDE_MODE=api DB_CLAUDE_API_PORT=8010 ./scripts/start-db-claude.sh
+AUTOPG_MODE=api AUTOPG_API_PORT=8010 ./scripts/start-autopg.sh
 ```
 
 Check:
@@ -247,20 +247,20 @@ curl http://127.0.0.1:8010/api/sessions
 
 ## Stop services
 
-Stop db-claude API, standalone postgres_mcp/postgres_mcp processes, and leftover MCP child
+Stop AutoPG API, standalone postgres_mcp/postgres_mcp processes, and leftover MCP child
 processes:
 
 ```bash
-./scripts/stop-db-claude.sh
+./scripts/stop-autopg.sh
 ```
 
 By default, the stop script leaves PostgreSQL running. To stop PostgreSQL too:
 
 ```bash
-DB_CLAUDE_STOP_POSTGRES=true ./scripts/stop-db-claude.sh
+AUTOPG_STOP_POSTGRES=true ./scripts/stop-autopg.sh
 ```
 
-For an interactive `db-claude` session, exit with:
+For an interactive `autopg` session, exit with:
 
 ```text
 /exit
@@ -274,13 +274,13 @@ Check PostgreSQL:
 
 ```bash
 pg_isready -h localhost -p 5432
-psql "$DB_CLAUDE_DATABASE_URI" -c "select current_database(), current_user, version();"
+psql "$AUTOPG_DATABASE_URI" -c "select current_database(), current_user, version();"
 ```
 
-Check db-claude + built-in postgres_mcp:
+Check AutoPG + built-in postgres_mcp:
 
 ```bash
-python -m db_claude.main --print "列出所有 schema"
+python -m autopg.main --print "列出所有 schema"
 ```
 
 Check DeepSeek connectivity:
@@ -323,10 +323,10 @@ brew services restart postgresql@17
 Built-in MCP is enough for most deployments. If you want to override it, copy the committed example file:
 
 ```bash
-cp .claude/.mcp.example.json .claude/.mcp.json
+cp .autopg/.mcp.example.json .autopg/.mcp.json
 ```
 
-Then edit `.claude/.mcp.json`:
+Then edit `.autopg/.mcp.json`:
 
 ```json
 {
@@ -360,8 +360,8 @@ Recent compatibility fixes include:
 
 ```bash
 git status
-git add README.md pyproject.toml requirements.txt scripts/ db_claude/
-git commit -m "feat: package db-claude as PostgreSQL tuning agent with built-in postgres_mcp"
+git add README.md pyproject.toml requirements.txt scripts/ autopg/
+git commit -m "feat: package AutoPG as PostgreSQL tuning agent with built-in postgres_mcp"
 git push origin feature/database-agent-20260618
 ```
 

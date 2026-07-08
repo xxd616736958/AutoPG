@@ -564,7 +564,7 @@ async def get_top_queries(
         return format_error_response(str(e))
 
 
-# Short aliases used by MCP skills and Claude-style tool names.
+# Short aliases used by MCP skills and AutoPG-style tool names.
 mcp.add_tool(
     explain_query,
     name="explain",

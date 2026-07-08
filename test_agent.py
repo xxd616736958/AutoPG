@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-End-to-end test cases for db-claude agent using DeepSeek.
+End-to-end test cases for AutoPG agent using DeepSeek.
 Tests the agent's ability to solve real problems with tool use.
 """
 import asyncio
@@ -10,8 +10,8 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from db_claude.tools import ALL_TOOLS
-from db_claude.agent.query_engine import QueryEngine
+from autopg.tools import ALL_TOOLS
+from autopg.agent.query_engine import QueryEngine
 
 # DeepSeek config
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
@@ -100,7 +100,7 @@ async def test_case_2_file_read_and_explain():
 
     engine = create_engine(max_turns=5)
     result = await consume_result(engine,
-        "Read the file 'db_claude/tools/base.py' and explain in 3-4 bullet points "
+        "Read the file 'autopg/tools/base.py' and explain in 3-4 bullet points "
         "what the Tool base class provides."
     )
     print_result(result)
@@ -116,7 +116,7 @@ async def test_case_3_bash_and_analysis():
 
     engine = create_engine(max_turns=6)
     result = await consume_result(engine,
-        "Use bash to list all the Python files in the db_claude/tools/ directory "
+        "Use bash to list all the Python files in the autopg/tools/ directory "
         "and show their sizes. Then tell me which is the largest file and what "
         "tool it likely implements."
     )
@@ -133,7 +133,7 @@ async def test_case_4_glob_search():
 
     engine = create_engine(max_turns=6)
     result = await consume_result(engine,
-        "1. Use Glob to find all __init__.py files in the db_claude/ directory tree.\n"
+        "1. Use Glob to find all __init__.py files in the autopg/ directory tree.\n"
         "2. Read one of them and tell me what it exports.\n"
         "3. Count how many __init__.py files you found."
     )
@@ -148,7 +148,7 @@ async def test_case_5_code_writing():
     """Test Case 5: Write a file then read it back."""
     print_section("TC5: Write + Read Verification")
 
-    test_file = "/tmp/db_claude_test_demo.py"
+    test_file = "/tmp/autopg_test_demo.py"
     engine = create_engine(max_turns=6)
 
     result = await consume_result(engine,
@@ -180,7 +180,7 @@ async def test_case_5_code_writing():
 
 async def main():
     print("╔═══════════════════════════════════════════════════════════╗")
-    print("║   db-claude Agent Verification — DeepSeek v4 Flash       ║")
+    print("║   AutoPG Agent Verification — DeepSeek v4 Flash       ║")
     print(f"║   Model: {DEEPSEEK_MODEL}                                    ║")
     print(f"║   Time:  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}                            ║")
     print("╚═══════════════════════════════════════════════════════════╝")

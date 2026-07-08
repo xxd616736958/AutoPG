@@ -1,4 +1,4 @@
-# db-claude 最优架构设计
+# AutoPG 最优架构设计
 
 > 基于 LangChain 1.3 + LangGraph 1.2 生态的最佳实践。
 > 原则：充分利用官方组件，自定义只在必要时介入。
@@ -8,7 +8,7 @@
 ## 一、项目结构
 
 ```
-db_claude/
+autopg/
 ├── graph.py                          # ← langgraph serve 唯一入口
 │   └── compiled_graph                # 模块级导出：SqliteSaver + 完整编排图
 │
@@ -75,7 +75,7 @@ db_claude/
 │                                                             │
 │  compiled_graph = orchestrator.compile(                    │
 │      checkpointer=SqliteSaver.from_conn_string(            │
-│          "~/.db-claude/checkpoints.db"                     │
+│          "~/.autopg/checkpoints.db"                     │
 │      )                                                     │
 │  )                                                         │
 └─────────────────────────────────────────────────────────────┘
@@ -310,7 +310,7 @@ def _should_continue(state: OrchestratorState) -> Literal["route", "end"]:
 
 # ── 模块级导出 ──
 import os
-db_path = os.path.join(os.path.expanduser("~/.db-claude"), "checkpoints.db")
+db_path = os.path.join(os.path.expanduser("~/.autopg"), "checkpoints.db")
 os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
 compiled_graph = _build_orchestrator().compile(
@@ -437,7 +437,7 @@ workflow.add_conditional_edges("router", _fanout_explore, ["explore"])
 
 ```bash
 # 开发
-python -m db_claude.main
+python -m autopg.main
 
 # 部署为 HTTP API
 langgraph serve graph.py
@@ -465,4 +465,4 @@ langgraph serve graph.py
 
 5. **`submit_message` 不再是中间件编排器。** 中间件已经在图内部。它只做事件转换。
 
-6. **每个 agent 有独立的工具集、模型、中间件栈。** 和 Claude Code 的 AgentDefinition 完全对应。
+6. **每个 agent 有独立的工具集、模型、中间件栈。** 和 AutoPG 的 AgentDefinition 完全对应。
